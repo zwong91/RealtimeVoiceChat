@@ -1,0 +1,6 @@
+realtimestt==0.3.103
+realtimetts[kokoro,coqui,orpheus]==0.5.3
+fastapi
+uvicorn
+python-dotenv
+ollama
