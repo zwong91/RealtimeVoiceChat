@@ -1,5 +1,7 @@
 # Real-Time AI Voice Chat 🎤💬🧠🔊
 
+*early preview - current state still contains lots of bugs and unsolved edge cases*
+
 Implements a real-time, voice-based chat application where users can speak directly to an AI assistant and receive spoken responses, mimicking a natural conversation flow. It utilizes a client-server architecture with WebSockets for low-latency communication.
 
 ## Overview
