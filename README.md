@@ -15,7 +15,7 @@ The system captures microphone audio from a web client, streams it to a Python b
 *   **Low Latency:** Optimized for minimal delay using audio chunk streaming.
 *   **Real-Time Transcription:** Uses `RealtimeSTT` for fast and accurate speech-to-text conversion.
 *   **Turn Detection:** Employs a model (`turndetect.py`) to dynamically adjust silence thresholds for natural conversation flow.
-*   **LLM Integration:** Connects to LLMs (configurable, supports Ollama and potentially OpenAI via `inference.py`) for intelligent responses.
+*   **LLM Integration:** Connects to LLMs (configurable, supports Ollama and potentially OpenAI via `inference.py`).
 *   **Real-Time Text-to-Speech (TTS):** Uses `RealtimeTTS` with various engine options (Kokoro, Coqui, Orpheus) to generate spoken audio (`audio_out.py`).
 *   **Partial & Final Responses:** Displays user transcriptions and AI responses as they are generated.
 *   **Interruption Handling:** Allows the user to interrupt the AI's response by speaking.
