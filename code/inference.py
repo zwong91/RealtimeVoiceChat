@@ -251,7 +251,7 @@ class LLMProcessor:
             except httpx.ConnectError as e:
                 if attempts < max_retries:
                     attempts += 1
-                    logging.warning("💥 Couldn't connect to Ollama, running 'ollama ps' and retrying...")
+                    logging.warning("🧠💥 Couldn't connect to Ollama, running 'ollama ps' and retrying...")
                     try:
                         subprocess.run(["ollama", "ps"], check=True)
                     except subprocess.CalledProcessError as e2:

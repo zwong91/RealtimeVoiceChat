@@ -137,7 +137,7 @@ class LanguageProcessor:
                 yield token
             if self.last_final_answer_token_sent:
                 self.last_final_answer_token_sent()
-            print(f"🧠 {RED}-*###*-{RESET} Paused Generator set to NONE -> finished retrieval")
+            print(f"🧠 {Colors.RED}-*###*-{Colors.RESET} Paused Generator set to NONE -> finished retrieval")
             self.paused_generator = None
 
         return tts_generator()
@@ -159,7 +159,7 @@ class LanguageProcessor:
         )
 
         answer = ""
-        print(f"🧠 {RED}-*###*-{RESET} Paused Generator set to NONE -> NEW SENTENCE PROCESSING")
+        print(f"🧠 {Colors.RED}-*###*-{Colors.RESET} Paused Generator set to NONE -> NEW SENTENCE PROCESSING")
         self.paused_generator = None
         self.pause_overhang = None
         self.stop_event.clear()

@@ -34,10 +34,8 @@ class AudioInputProcessor:
         )
         self.transcription_task = asyncio.create_task(self._run_transcription_loop())
         
-        self.interruption_callback: Optional[Callable[[], None]] = None
         self.realtime_callback: Optional[Callable[[str], None]] = None
         self.recording_start_callback: Optional[Callable[[str], None]] = None
-        self.client_playing = False
         self.interrupted = False
         
         self._setup_callbacks()

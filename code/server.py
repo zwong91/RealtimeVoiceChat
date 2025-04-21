@@ -23,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.responses import HTMLResponse, Response, FileResponse
 
 USE_SSL = False
-START_ENGINE = "kokoro"
+START_ENGINE = "coqui"
 
 if sys.platform == "win32":
     # Use the selector loop instead of proactor on Windows
@@ -35,7 +35,7 @@ from audio_in import AudioInputProcessor
 from colors import Colors
 
 LANGUAGE = "en"
-STATUS_UPDATE_INTERVAL_SECONDS = 0.2
+TTS_FINAL_TIMEOUT = 0.5 # unsure if 1.0 is needed for stability
 
 # --------------------------------------------------------------------
 # Custom no-cache StaticFiles
@@ -112,7 +112,7 @@ def parse_json_message(text: str) -> dict:
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        logger.warning("🖥️ Ignoring client message with invalid JSON")
+        logger.warning("🖥️💥 Ignoring client message with invalid JSON")
         return {}
 
 def format_timestamp_ns(timestamp_ns: int) -> str:
@@ -149,7 +149,7 @@ async def process_incoming_data(ws: WebSocket, app: FastAPI, incoming_chunks: as
 
                 # First, check that we have at least 4 bytes for the header.
                 if len(raw) < 4:
-                    logger.warning("Received data too short for metadata header.")
+                    logger.warning("🖥️💥 Received data too short for metadata header.")
                     continue
 
                 # Read the first 4 bytes for the metadata length.
@@ -158,7 +158,7 @@ async def process_incoming_data(ws: WebSocket, app: FastAPI, incoming_chunks: as
                 # Make sure the payload has enough bytes for the metadata.
                 if len(raw) < 4 + meta_length:
                     logger.warning(
-                        f"Incomplete metadata received, length of packet: {len(raw)}, expected min: 4 + meta data len {meta_length}."
+                        f"🖥️💥 Incomplete metadata received, length of packet: {len(raw)}, expected min: 4 + meta data len {meta_length}."
                     )
                     continue
 
@@ -197,11 +197,9 @@ async def process_incoming_data(ws: WebSocket, app: FastAPI, incoming_chunks: as
                 if msg_type == "tts_start":
                     # logger.info("🖥️ Received tts_start from client.")
                     app.state.TTS_Client_Playing = True
-                    app.state.AudioInputProcessor.client_playing = True
                 elif msg_type == "tts_stop":
                     # logger.info("🖥️ Received tts_stop from client.")
                     app.state.TTS_Client_Playing = False
-                    app.state.AudioInputProcessor.client_playing = False
                 # Add to the handleJSONMessage function in server.py
                 elif msg_type == "clear_history":
                     # logger.info("🖥️ Received clear_history from client.")
@@ -210,7 +208,7 @@ async def process_incoming_data(ws: WebSocket, app: FastAPI, incoming_chunks: as
     except asyncio.CancelledError:
         pass
     except WebSocketDisconnect as e:
-        logger.warning(f"🖥️ {Colors.apply('WARNING').red} disconnect in process_incoming_data: {repr(e)}")
+        logger.warning(f"🖥️💥 {Colors.apply('WARNING').red} disconnect in process_incoming_data: {repr(e)}")
     except RuntimeError as e:  # Often raised on closed transports
         logger.error(f"🖥️ {Colors.apply('RUNTIME_ERROR').red} in process_incoming_data: {repr(e)}")
     except Exception as e:
@@ -231,7 +229,7 @@ async def send_text_messages(ws: WebSocket, message_queue: asyncio.Queue) -> Non
     except asyncio.CancelledError:
         pass
     except WebSocketDisconnect as e:
-        logger.warning(f"🖥️ {Colors.apply('WARNING').red} disconnect in send_text_messages: {repr(e)}")
+        logger.warning(f"🖥️💥 {Colors.apply('WARNING').red} disconnect in send_text_messages: {repr(e)}")
     except RuntimeError as e:  # Often raised on closed transports
         logger.error(f"🖥️ {Colors.apply('RUNTIME_ERROR').red} in send_text_messages: {repr(e)}")
     except Exception as e:
@@ -244,8 +242,6 @@ async def send_tts_chunks(app: FastAPI, message_queue: asyncio.Queue, callbacks)
     try:
         logger.info("🖥️ Starting TTS chunk sender")
         last_quick_answer_chunk = 0
-        last_status_sent = 0
-
         prev_status = None
 
         while True:
@@ -256,7 +252,7 @@ async def send_tts_chunks(app: FastAPI, message_queue: asyncio.Queue, callbacks)
                 int(app.state.TTS_To_Client),
                 int(app.state.TTS_Client_Playing),
                 int(app.state.TTS_Chunk_Sent),
-                int(app.state.AudioOutProcessor.synthesis_running),
+                int(app.state.AudioOutProcessor.synthesis_available.is_set()),
                 int(callbacks.is_hot),
                 int(callbacks.synthesis_started),
             )
@@ -268,7 +264,7 @@ async def send_tts_chunks(app: FastAPI, message_queue: asyncio.Queue, callbacks)
                     f"{status} To_Client {curr_status[0]}, "
                     f"TTS_playing {curr_status[1]}, "
                     f"Chunk_Sent {curr_status[2]}, "
-                    f"synth_run {curr_status[3]}, "
+                    f"synth_free {curr_status[3]}, "
                     f"hot {curr_status[4]}, synth_start {curr_status[5]}"
                 )
                 prev_status = curr_status
@@ -298,21 +294,24 @@ async def send_tts_chunks(app: FastAPI, message_queue: asyncio.Queue, callbacks)
                 await asyncio.sleep(0.001)
 
                 if app.state.TTS_Chunk_Sent:
-                    # If we've sent something before and it's been a moment since the last quick answer chunk
-                    if last_quick_answer_chunk and time.time() - last_quick_answer_chunk > 1:
-                        if not app.state.AudioOutProcessor.synthesis_running:
-                            base64_chunk = app.state.AudioOutProcessor.flush_base64_chunk()
-                            message_queue.put_nowait({
-                                "type": "tts_chunk",
-                                "content": base64_chunk
-                            })
+                    if (last_quick_answer_chunk 
+                        and time.time() - last_quick_answer_chunk > TTS_FINAL_TIMEOUT
+                        and app.state.AudioOutProcessor.synthesis_available.is_set()
+                        and not app.state.LanguageProcessor.paused_generator
+                        ):
 
-                            app.state.TTS_To_Client = False
-                            app.state.TTS_Chunk_Sent = False
-                            callbacks.reset_state()
-                            last_quick_answer_chunk = 0
+                        base64_chunk = app.state.AudioOutProcessor.flush_base64_chunk()
+                        message_queue.put_nowait({
+                            "type": "tts_chunk",
+                            "content": base64_chunk
+                        })
 
-                            logger.info(Colors.apply("🖥️ All TTS chunks sent to client").green)
+                        app.state.TTS_To_Client = False
+                        app.state.TTS_Chunk_Sent = False
+                        callbacks.reset_state()
+                        last_quick_answer_chunk = 0
+
+                        logger.info(Colors.apply("🖥️ All TTS chunks sent to client").green)
                 continue
 
             # If we have an actual chunk, convert to base64 and send
@@ -327,7 +326,7 @@ async def send_tts_chunks(app: FastAPI, message_queue: asyncio.Queue, callbacks)
                 async def reset_interrupt_flag_later():
                     await asyncio.sleep(1)
                     if app.state.AudioInputProcessor.interrupted:
-                        logger.info(f"{Colors.apply('🖥️🎙️ INTERRUPTION DEACTIVATED').cyan}")
+                        logger.info(f"{Colors.apply('🖥️🎙️ ▶️ Microphone continued').cyan}")
                         app.state.AudioInputProcessor.interrupted = False
                     logger.info(Colors.apply("🖥️ interruption flag reset after TTS chunk").cyan)
                 
@@ -340,21 +339,14 @@ async def send_tts_chunks(app: FastAPI, message_queue: asyncio.Queue, callbacks)
                 else:
                     # If there's no generator, the quick answer is already done.
                     logger.info(f"Quick answer finished: {app.state.LanguageProcessor.last_fast_answer}")
-                    message_queue.put_nowait({
-                        "type": "final_assistant_answer",
-                        "content": app.state.LanguageProcessor.last_fast_answer
-                    })
-                    app.state.LanguageProcessor.history.append({
-                        "role": "assistant",
-                        "content": app.state.LanguageProcessor.last_fast_answer
-                    })
+                    callbacks.send_final_assistant_answer()
 
             app.state.TTS_Chunk_Sent = True
 
     except asyncio.CancelledError:
         pass
     except WebSocketDisconnect as e:
-        logger.warning(f"🖥️ {Colors.apply('WARNING').red} disconnect in send_tts_chunks: {repr(e)}")
+        logger.warning(f"🖥️💥 {Colors.apply('WARNING').red} disconnect in send_tts_chunks: {repr(e)}")
     except RuntimeError as e:
         logger.error(f"🖥️ {Colors.apply('RUNTIME_ERROR').red} in send_tts_chunks: {repr(e)}")
     except Exception as e:
@@ -375,30 +367,42 @@ class TranscriptionCallbacks:
         self.is_hot = False
         self.synthesis_started = False
         self.assistant_answer = ""
-        self.is_processing_potential = False      
+        self.is_processing_potential = False
         self.final_transcription = ""
 
     def on_partial(self, txt: str):
+        self.final_assistant_answer_sent = False
+        self.final_transcription = ""
         self.message_queue.put_nowait({"type": "partial_user_request", "content": txt})
+
+    def get_final_transcription(self):
+        if not self.final_transcription:
+            start_time = time.time()
+            audio = self.app.state.AudioInputProcessor.transcriber.get_audio_copy()
+            self.final_transcription = self.app.state.AudioInputProcessor.transcriber.recorder.perform_final_transcription(audio)
+            end_time = time.time()
+            if self.final_transcription:
+                logger.info(f"{Colors.apply('🖥️💭 FINAL TRANSCRIPTION: ').green}{self.final_transcription} in {end_time - start_time:.2f} seconds")
+                #logger.info(f"{Colors.apply('🖥️💭 FINAL TRANSCRIPTION: ').green}{self.final_transcription} (partial: {txt}) in {end_time - start_time:.2f} seconds")
+                self.app.state.LanguageProcessor.process_potential_sentence(self.final_transcription)
+            else:
+                logger.warning(f"{Colors.apply('🖥️💥 WARNING #### !!!!! ').red} No final transcription available.")
+                logger.info(f"Audio length: {len(audio)} bytes")
+
 
     def on_potential_sentence(self, txt: str):
         logger.info(f"{Colors.apply('🖥️💭 SENTENCE: ').yellow}{txt} {'[x]' if self.synthesis_started else '[OK]'}")
 
         if not self.synthesis_started and not self.is_hot and not self.is_processing_potential:
             self.is_processing_potential = True
-            start_time = time.time()
-            audio = self.app.state.AudioInputProcessor.transcriber.get_audio_copy()
-            self.final_transcription = self.app.state.AudioInputProcessor.transcriber.recorder.perform_final_transcription(audio)
-            end_time = time.time()
-            if self.final_transcription:
-                logger.info(f"{Colors.apply('🖥️💭 FINAL TRANSCRIPTION: ').green}{self.final_transcription} (partial: {txt}) in {end_time - start_time:.2f} seconds")
-                self.app.state.LanguageProcessor.process_potential_sentence(self.final_transcription)
+            self.get_final_transcription()
             self.is_processing_potential = False
 
     def on_potential_final(self, txt: str):
         logger.info(f"{Colors.apply('🖥️💭 HOT: ').magenta}{txt}")
         self.is_hot = True
-        self.app.state.LanguageProcessor.return_fast_sentence_answer(txt)
+        self.get_final_transcription()
+        self.app.state.LanguageProcessor.return_fast_sentence_answer(self.final_transcription)
 
     def on_fast_answer(self, txt: str):
         logger.info(f"{Colors.apply('🖥️💭 SUPERHOT: ').red.bold}{txt}")
@@ -409,14 +413,15 @@ class TranscriptionCallbacks:
 
     def on_potential_abort(self):
         logger.info(f"{Colors.apply('🖥️💭 COLD').blue}")
-        self.is_hot = False
-        self.synthesis_started = False
-        self.app.state.AudioOutProcessor.abort_synthesis_quick()
+        self.app.state.AudioOutProcessor.abort_syntheses()
+        self.app.state.LanguageProcessor.stop_event.set()
+        self.reset_state()
 
     def on_before_final(self, audio: bytes, txt: str):
+        print(Colors.apply('=========================================================================').light_gray)
         # first block further incoming audio
         if not self.app.state.AudioInputProcessor.interrupted:
-            logger.info(f"{Colors.apply('🖥️🎙️ INTERRUPTION ACTIVATED').cyan}")
+            logger.info(f"{Colors.apply('🖥️🎙️ ⏸️ Microphone interrupted').cyan}")
             self.app.state.AudioInputProcessor.interrupted = True
 
         # this method is not allowed to block
@@ -435,7 +440,6 @@ class TranscriptionCallbacks:
             "content": self.final_transcription
         })
         self.app.state.LanguageProcessor.history.append({"role": "user", "content": self.final_transcription})
-        self.final_transcription = ""
 
         self.message_queue.put_nowait({
             "type": "partial_assistant_answer",
@@ -469,33 +473,30 @@ class TranscriptionCallbacks:
                 "type": "stop_tts",
                 "content": ""
             })
+
+            self.send_final_assistant_answer()
+
             logger.info(f"{Colors.apply('🖥️💭 INTERRUPTION').blue}")
             self.stop_tts()
+
+    def send_final_assistant_answer(self):
+        if not self.final_assistant_answer_sent and self.assistant_answer:
+            import re
+            self.assistant_answer = re.sub(r'[\r\n]+', ' ', self.assistant_answer)
+            self.assistant_answer = re.sub(r'\s+', ' ', self.assistant_answer)
+            self.assistant_answer = self.assistant_answer.replace('\\n', ' ')
+
+            logger.info(f"\n{Colors.apply('🖥️💭 FINAL ASSISTANT ANSWER: ').green}{self.assistant_answer}")
+            self.message_queue.put_nowait({
+                "type": "final_assistant_answer",
+                "content": self.assistant_answer
+            })
+            self.final_assistant_answer_sent = True
+            self.app.state.LanguageProcessor.history.append({"role": "assistant", "content": self.assistant_answer})
+
 
     def last_final_answer_token_sent(self):
-        import re
-        self.assistant_answer = re.sub(r'[\r\n]+', ' ', self.assistant_answer)
-        self.assistant_answer = re.sub(r'\s+', ' ', self.assistant_answer)
-        self.assistant_answer = self.assistant_answer.replace('\\n', ' ')
-        logger.info(f"\n{Colors.apply('🖥️💭 FINAL ASSISTANT ANSWER: ').green}{self.assistant_answer}")
-        self.message_queue.put_nowait({
-            "type": "final_assistant_answer",
-            "content": self.assistant_answer
-        })
-        self.app.state.LanguageProcessor.history.append({"role": "assistant", "content": self.assistant_answer})
-
-    def on_voice_interruption(self):
-        current_time = time.time()
-        # If _last_interrupt_time exists and the difference is less than 200ms, do nothing.
-        if hasattr(self, "_last_interrupt_time") and (current_time - self._last_interrupt_time < 0.2):
-            return
-
-        # Update the timestamp for the last interruption processed.
-        self._last_interrupt_time = current_time
-
-        if self.app.state.TTS_Client_Playing:
-            logger.info(f"{Colors.apply('🖥️💭 INTERRUPTION').blue}")
-            self.stop_tts()
+        self.send_final_assistant_answer()
 
 # --------------------------------------------------------------------
 # Main WebSocket endpoint
@@ -521,7 +522,6 @@ async def websocket_endpoint(ws: WebSocket):
     app.state.AudioInputProcessor.transcriber.potential_full_transcription_abort_callback = callbacks.on_potential_abort
     app.state.AudioInputProcessor.transcriber.full_transcription_callback = callbacks.on_final
     app.state.AudioInputProcessor.transcriber.before_final_sentence = callbacks.on_before_final
-    app.state.AudioInputProcessor.interruption_callback = callbacks.on_voice_interruption
     app.state.AudioInputProcessor.recording_start_callback = callbacks.on_recording_start
 
     # Attach callback for fast answers

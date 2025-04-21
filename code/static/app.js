@@ -322,8 +322,6 @@ function handleJSONMessage({ type, content }) {
       ttsWorkletNode.port.postMessage({ type: "clear" });
     }
     isTTSPlaying = false;
-    console.log("TTS playback stopped. Reason: tts_interruption.");
-    socket.send(JSON.stringify({ type: 'tts_stop' }));
     ignoreIncomingTTS = false;
     return;
   }
@@ -333,6 +331,8 @@ function handleJSONMessage({ type, content }) {
     }
     isTTSPlaying = false;
     ignoreIncomingTTS = true;
+    console.log("TTS playback stopped. Reason: tts_interruption.");
+    socket.send(JSON.stringify({ type: 'tts_stop' }));
     return;
   }
 }

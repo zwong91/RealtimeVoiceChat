@@ -337,12 +337,12 @@ class TranscriptionProcessor:
             "use_microphone": False,
             "spinner": False,
 
-            # "model": "base.en",
-            # "realtime_model_type": "base.en",
-            # "use_main_model_for_realtime": False,
             "model": "base.en",
+            "realtime_model_type": "base.en",
+            "use_main_model_for_realtime": False,
+            # "model": "base.en",
             #"realtime_model_type": "large-v2",
-            "use_main_model_for_realtime": True,
+            #"use_main_model_for_realtime": True,
 
             "language": self.source_language,
             #"silero_sensitivity": 0.1,
@@ -371,7 +371,7 @@ class TranscriptionProcessor:
             "on_recording_start": start_recording,
             "on_recording_stop": stop_recording,
             "debug_mode": True,
-            "initial_prompt": incompletion_prompt,    
+            # "initial_prompt": incompletion_prompt,
             "initial_prompt_realtime": incompletion_prompt,
         
             "faster_whisper_vad_filter": False,

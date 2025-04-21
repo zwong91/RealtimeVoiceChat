@@ -1,5 +1,7 @@
 # Real-Time AI Voice Chat 🎤💬🧠🔊
 
+*early preview - current state still contains lots of bugs and unsolved edge cases*
+
 Implements a real-time, voice-based chat application where users can speak directly to an AI assistant and receive spoken responses, mimicking a natural conversation flow. It utilizes a client-server architecture with WebSockets for low-latency communication.
 
 ## Overview
@@ -13,7 +15,7 @@ The system captures microphone audio from a web client, streams it to a Python b
 *   **Low Latency:** Optimized for minimal delay using audio chunk streaming.
 *   **Real-Time Transcription:** Uses `RealtimeSTT` for fast and accurate speech-to-text conversion.
 *   **Turn Detection:** Employs a model (`turndetect.py`) to dynamically adjust silence thresholds for natural conversation flow.
-*   **LLM Integration:** Connects to LLMs (configurable, supports Ollama and potentially OpenAI via `inference.py`) for intelligent responses.
+*   **LLM Integration:** Connects to LLMs (configurable, supports Ollama and potentially OpenAI via `inference.py`).
 *   **Real-Time Text-to-Speech (TTS):** Uses `RealtimeTTS` with various engine options (Kokoro, Coqui, Orpheus) to generate spoken audio (`audio_out.py`).
 *   **Partial & Final Responses:** Displays user transcriptions and AI responses as they are generated.
 *   **Interruption Handling:** Allows the user to interrupt the AI's response by speaking.
@@ -113,15 +115,31 @@ The system captures microphone audio from a web client, streams it to a Python b
 
 Several aspects of the application can be configured by modifying the Python source files:
 
-*   **TTS Engine (`server.py`, `audio_out.py`):** Change `START_ENGINE` in `server.py` to "coqui", "kokoro", or "orpheus". Configure engine-specific settings (voice, speed, etc.) within `AudioOutProcessor.__init__` in `audio_out.py`. Note: Coqui requires a `reference_audio.wav` file.
+*   **TTS Engine (`server.py`, `audio_out.py`):**  
+  Change `START_ENGINE` in `server.py` to "coqui", "kokoro", or "orpheus". Configure engine-specific settings (voice, speed, etc.) within `AudioOutProcessor.__init__` in `audio_out.py`. 
+  When you choose CoquiEngine, keep in mind it still has a few edge-case glitches in its piping. But it shines in expressiveness and speed - eespecially if you run it through DeepSpeed, which I really recommend. On Linux, you can just `pip install deepspeed`, but on Windows you'll need to build it yourself. A handy tool for that is [deepspeedpatcher](https://github.com/erew123/deepspeedpatcher). When you compile, enable the “CUTLESS_OPS,” “SPARSE_ATTN,” and “INFERENCE_CORE_OPS” options. You'll have to install a few prerequisites first (check the repo's README), but the performance boost is well worth the extra setup.
 *   **LLM Model & Backend (`handlerequests.py`, `inference.py`):**
     *   Set the desired `MODEL` (e.g., Ollama model name or HF path) and `TOKENIZER_MODEL` in `handlerequests.py`.
     *   Modify `DEFAULT_BACKEND` and model names (`OPENAI_MODEL`, `OLLAMA_MODEL`) in `inference.py` or use environment variables (`LLM_BACKEND`, `OPENAI_API_KEY`).
     *   Adjust system prompts (`fast_answer_system_prompt`, `orpheus_prompt_addon`) in `handlerequests.py`.
 *   **STT Settings (`transcribe.py`):** Modify `recorder_cfg` within `TranscriptionProcessor._create_recorder` to change Whisper model size, language, sensitivities, silence durations, etc.
 *   **Turn Detection (`turndetect.py`):** Adjust pause duration constants (`ellipsis_pause`, `punctuation_pause`, etc.) for different speaking styles.
-*   **SSL (`server.py`):** Set `USE_SSL = True` and provide certificate/key files if HTTPS is required.
-
+* **SSL (`server.py`):**  
+  Set `USE_SSL = True` and provide certificate/key files if HTTPS is required.  
+  To generate local certificates on Windows:
+  1. Run your command prompt as administrator.
+  2. Install mkcert with Chocolatey:
+     ```bat
+     choco install mkcert
+     ```
+  3. Install the local CA:
+     ```bat
+     mkcert -install
+     ```
+  4. Create certificates for localhost and your local IP:
+     ```bat
+     mkcert 127.0.0.1 192.168.178.123
+     
 ## Contributing
 
 Contributions are welcome! Please feel free to submit pull requests or open issues for bugs, feature requests, or improvements.

@@ -6,6 +6,7 @@ import asyncio
 import wave
 import numpy as np
 import threading
+from huggingface_hub import hf_hub_download
 from scipy.signal import resample_poly
 from collections import namedtuple
 
@@ -25,6 +26,25 @@ WRITE_FILES = False  # Set to True to write WAV files for debugging.
 QUICK_ANSWER_STREAM_CHUNK_SIZE = 8
 FINAL_ANSWER_STREAM_CHUNK_SIZE = 30
 
+# Coqui model download helper functions
+def create_directory(path):
+    if not os.path.exists(path):
+        os.makedirs(path)
+
+def ensure_lasinya_models(models_root="models", model_name="Lasinya"):
+    base = os.path.join(models_root, model_name)
+    create_directory(base)
+    files = ["config.json", "vocab.json", "speakers_xtts.pth", "model.pth"]
+    for fn in files:
+        local_file = os.path.join(base, fn)
+        if not os.path.exists(local_file):
+            print(f"Downloading {fn} to {base}")
+            hf_hub_download(
+                repo_id="KoljaB/XTTS_Lasinya",
+                filename=fn,
+                local_dir=base
+            )
+
 class AudioOutProcessor:
     def __init__(
             self,
@@ -39,24 +59,23 @@ class AudioOutProcessor:
 
         self.quick_interrupted = False
         self.final_interrupted = False
-        self.synthesis_running = False
+        # use Event instead of bool
+        self.synthesis_available = threading.Event()
+        self.synthesis_available.set()
+
 
         self.current_stream_chunk_size = QUICK_ANSWER_STREAM_CHUNK_SIZE
 
         self.working_dir = os.path.dirname(os.path.abspath(__file__))
         logger.info(f"Working directory: {self.working_dir}")
 
-        # self.last_chunk_tail = np.zeros(64, dtype=np.float32)
-
         self.previous_chunk = None
         self.resampled_previous_chunk = None
 
         # Assuming mono audio and int16 samples:
         num_channels = 1
-        sampwidth = 2  # bytes for int16
+        sampwidth = 2
         if WRITE_FILES:
-            # Open two WAV files for writing:
-            # One for 24000 Hz (original) and one for 48000 Hz (upsampled).
             self.original_wave = wave.open(os.path.join(self.working_dir, "original.wav"), "wb")
             self.upsampled_wave = wave.open(os.path.join(self.working_dir, "upsampled.wav"), "wb")
 
@@ -68,28 +87,28 @@ class AudioOutProcessor:
             self.upsampled_wave.setsampwidth(sampwidth)
             self.upsampled_wave.setframerate(48000)
 
-        # Create the Engine. Adjust arguments as needed.
         from RealtimeTTS import TextToAudioStream
         if engine == "coqui":
+            ensure_lasinya_models(models_root="models", model_name="Lasinya")
             from RealtimeTTS import CoquiEngine
             self.engine = CoquiEngine(
-                speed=1.1,
-                use_deepspeed=False,
+                specific_model="Lasinya",
+                local_models_path="./models",
                 voice="reference_audio.wav",
-                thread_count=24,
+                speed=1.1,
+                use_deepspeed=True,
+                thread_count=6,
                 stream_chunk_size=self.current_stream_chunk_size,
                 overlap_wav_len=1024,
             )
         elif engine == "kokoro":
-            voice = "af_heart"  # Default voice for Kokoro
             from RealtimeTTS import KokoroEngine
             self.engine = KokoroEngine(
-                voice=voice,
+                voice="af_heart",
                 default_speed=1.2,
             )
         else:
             from RealtimeTTS import OrpheusEngine, OrpheusVoice
-            # self.engine = OrpheusEngine(model="isaiahbjork/orpheus-3b-0.1-ft")
             self.engine = OrpheusEngine(model="isaiahbjork/orpheus-3b-0.1-ft")
             voice = OrpheusVoice("tara")
             self.engine.set_voice(voice)
@@ -107,7 +126,6 @@ class AudioOutProcessor:
 
     def _on_stream_stop(self):
         """Callback when the audio stream stops."""
-        #self.synthesis_running = False
         logger.info("Audio stream stopped.")
 
     def _create_generator(self, text: str):
@@ -126,96 +144,56 @@ class AudioOutProcessor:
 
         upsampled_current_chunk = resample_poly(audio_float, 48000, 24000)
         if self.previous_chunk is None:
-            half_index = len(upsampled_current_chunk) // 2
-            return_chunk = upsampled_current_chunk[:half_index]
+            half = len(upsampled_current_chunk) // 2
+            part = upsampled_current_chunk[:half]
         else:
-            # Combine previous chunk with current data
-            combined_data = np.concatenate((self.previous_chunk, audio_float))
-            upsampled_float = resample_poly(combined_data, 48000, 24000)
-
-            # Retrieve the resampled length of the previous chunk
-            resampled_prev_len = len(self.resampled_previous_chunk)
-            half_index_prev = resampled_prev_len // 2
-            half_index_current = (len(upsampled_float) - resampled_prev_len) // 2 + resampled_prev_len
-
-            # Return the overlapping part of the resampled data
-            return_chunk = upsampled_float[half_index_prev:half_index_current]
+            combined = np.concatenate((self.previous_chunk, audio_float))
+            up = resample_poly(combined, 48000, 24000)
+            prev_len = len(self.resampled_previous_chunk)
+            h_prev = prev_len // 2
+            h_cur = (len(up) - prev_len) // 2 + prev_len
+            part = up[h_prev:h_cur]
 
         self.previous_chunk = audio_float
-        self.resampled_previous_chunk = upsampled_current_chunk  # Store resampled data
+        self.resampled_previous_chunk = upsampled_current_chunk
 
-        upsampled_audio = (return_chunk * 32767).astype(np.int16)
-        upsampled_bytes = upsampled_audio.tobytes()
-
+        pcm = (part * 32767).astype(np.int16).tobytes()
         if WRITE_FILES:
             self.original_wave.writeframes(chunk)
-            self.upsampled_wave.writeframes(upsampled_bytes)
-
-        # Optionally convert the upsampled data to a base64 string.
-        base64_chunk = base64.b64encode(upsampled_bytes).decode('utf-8')
-        return base64_chunk
+            self.upsampled_wave.writeframes(pcm)
+        return base64.b64encode(pcm).decode('utf-8')
 
     def flush_base64_chunk(self):
-        # Handle the last chunk of data
+        """Handle the last chunk of data"""
         if self.previous_chunk is not None:
-            upsampled_audio = (self.resampled_previous_chunk * 32767).astype(np.int16)
-            upsampled_bytes = upsampled_audio.tobytes()
-
+            pcm = (self.resampled_previous_chunk * 32767).astype(np.int16).tobytes()
             if WRITE_FILES:
-                self.upsampled_wave.writeframes(upsampled_bytes)
-
-            # Optionally convert the upsampled data to a base64 string.
-            base64_chunk = base64.b64encode(upsampled_bytes).decode('utf-8')
-
+                self.upsampled_wave.writeframes(pcm)
             self.previous_chunk = None
             self.resampled_previous_chunk = None
-
-            return base64_chunk
-
+            return base64.b64encode(pcm).decode('utf-8')
         return None
 
     def start_synthesis_final_thread(self, generator) -> threading.Thread:
-        """
-        Start the synthesis_final process in a new thread.
-        
-        Args:
-            generator: The generator to be passed to synthesis_final.
-        
-        Returns:
-            The thread object running synthesis_final.
-        """
-        thread = threading.Thread(target=self.synthesis_final, args=(generator,))
-        thread.start()
-        return thread
+        """Start the synthesis_final process in a new thread."""
+        t = threading.Thread(target=self.synthesis_final, args=(generator,))
+        t.start()
+        return t
 
     def start_synthesis_quick_thread(self, text: str) -> threading.Thread:
-        """
-        Start the synthesis_quick process in a new thread.
-        
-        Args:
-            text: The text to be processed by synthesis_quick.
-        
-        Returns:
-            The thread object running synthesis_quick.
-        """
-        thread = threading.Thread(target=self.synthesis_quick, args=(text,))
-        thread.start()
-        return thread
+        """Start the synthesis_quick process in a new thread."""
+        t = threading.Thread(target=self.synthesis_quick, args=(text,))
+        t.start()
+        return t
 
     def synthesis_final(self, generator) -> None:
+
+        self.synthesis_available.wait()
+        # now take it
         logger.info("Synthesizing final answer")
+        self.synthesis_available.clear()
 
-        last_log_time = time.time() - 1  # so it prints immediately on first loop
-
-        while self.synthesis_running:
-            current_time = time.time()
-            if current_time - last_log_time >= 1:
-                logger.info("Synthesis already running. Waiting...")
-                last_log_time = current_time
-            time.sleep(0.01)
-
-        self.synthesis_running = True
-        start_time = time.time()
+        start = time.time()
         self.final_interrupted = False
         self.stream.feed(generator)
 
@@ -223,16 +201,14 @@ class AudioOutProcessor:
             self.engine.set_stream_chunk_size(FINAL_ANSWER_STREAM_CHUNK_SIZE)
             self.current_stream_chunk_size = FINAL_ANSWER_STREAM_CHUNK_SIZE
 
-        def on_audio_chunk(chunk: bytes) -> None:
+        def on_audio_chunk(chunk: bytes):
             if self.final_interrupted:
                 logger.info("Final audio stream interrupted.")
                 return
             if on_audio_chunk.first_call:
                 on_audio_chunk.first_call = False
-                logger.info(f"Final audio start. TTFT: {time.time() - start_time:.2f}s")
-            
+                logger.info(f"Final audio start. TTFT: {time.time()-start:.2f}s")
             self.final_answer_audio_chunks.put_nowait(chunk)
-
         on_audio_chunk.first_call = True
 
         self.stream.play_async(
@@ -245,91 +221,65 @@ class AudioOutProcessor:
             default_silence_duration=self.silence.default,
         )
 
-        time.sleep(0.1)  # Allow some time for the stream to start (more than in quick, because it's a ganerator)
-
+        time.sleep(0.1)
         while not self.final_interrupted and self.stream.is_playing():
             time.sleep(0.001)
-
-        time.sleep(0.1)  # Allow some time for the stream to finish
-        self.synthesis_running = False
-
+        time.sleep(0.1)
+        # clear running flag
+        self.synthesis_available.set()
         logger.info("Final answer synthesis complete.")
 
     def synthesis_quick(self, text: str) -> None:
         logger.info(f"Synthesizing quick answer for: {text}")
-        if not isinstance(text, str) or not text.strip():
+        if not text.strip():
             raise ValueError("Text must be a non-empty string.")
-
-        self.synthesis_running = True
-        start_time = time.time()
+        # mark running
+        self.synthesis_available.wait()
+        self.synthesis_available.clear()
+        start = time.time()
         self.quick_interrupted = False
         self.stream.feed(self._create_generator(text))
 
-        # switch back to quick‑chunk size if needed
         if self.engine_name == "coqui" and self.current_stream_chunk_size != QUICK_ANSWER_STREAM_CHUNK_SIZE:
             self.engine.set_stream_chunk_size(QUICK_ANSWER_STREAM_CHUNK_SIZE)
             self.current_stream_chunk_size = QUICK_ANSWER_STREAM_CHUNK_SIZE
 
-        # jitter‑buffer state
-        buffer = []
-        good_streak = 0
-        buffering = True
-        buffered_duration = 0.0  # total playout time in buffer
+        buffer, good_streak, buffering, buf_dur = [], 0, True, 0.0
+        SR, BPS = 24000, 2
 
-        SAMPLE_RATE = 24000        # Hz
-        BYTES_PER_SAMPLE = 2       # int16 mono
-
-        def on_audio_chunk(chunk: bytes) -> None:
-            nonlocal buffer, good_streak, buffering, buffered_duration
-
+        def on_audio_chunk(chunk: bytes):
+            nonlocal buffer, good_streak, buffering, buf_dur
             if self.quick_interrupted:
                 logger.info("Quick audio stream interrupted.")
                 return
-
             now = time.time()
-            num_samples = len(chunk) // BYTES_PER_SAMPLE
-            playout = num_samples / SAMPLE_RATE
+            samples = len(chunk) // BPS
+            play = samples / SR
 
             if on_audio_chunk.first_call:
                 on_audio_chunk.first_call = False
                 self._quick_prev_chunk_time = now
-                logger.info(f"Quick audio start. TTFT: {now - start_time:.2f}s")
-                good = False
+                logger.info(f"Quick audio start. TTFT: {now-start:.2f}s")
             else:
                 gap = now - self._quick_prev_chunk_time
                 self._quick_prev_chunk_time = now
-                good = (gap <= playout)
-                if good:
-                    logger.info(f"👄✅ Chunk ok (gap={gap:.3f}s ≤ {playout:.3f}s)")
-                else:
-                    logger.warning(f"👄❌ Chunk slow (gap={gap:.3f}s > {playout:.3f}s)")
-
-            # stash every chunk and update buffered duration
-            buffer.append(chunk)
-            if buffering:
-                buffered_duration += playout
-
-            if buffering:
-                if good:
+                if gap <= play:
+                    logger.info(f"👄✅ Chunk ok (gap={gap:.3f}s ≤ {play:.3f}s)")
                     good_streak += 1
                 else:
+                    logger.warning(f"👄❌ Chunk slow (gap={gap:.3f}s > {play:.3f}s)")
                     good_streak = 0
 
-                # flush when 2 good in a row or ≥1s buffered
-                if good_streak >= 2 or buffered_duration >= 1.0:
-                    logger.info(
-                        "Jitter buffer ready ("
-                        f"good_streak={good_streak}, buffered_duration={buffered_duration:.3f}s); "
-                        "releasing buffered chunks."
-                    )
-                    for buffered_chunk in buffer:
-                        self.quick_answer_audio_chunks.put_nowait(buffered_chunk)
+            buffer.append(chunk)
+            if buffering:
+                buf_dur += play
+                if good_streak >= 2 or buf_dur >= 1.0:
+                    for c in buffer:
+                        self.quick_answer_audio_chunks.put_nowait(c)
                     buffer.clear()
                     buffering = False
             else:
-                # normal operation once buffer is flushed
                 self.quick_answer_audio_chunks.put_nowait(chunk)
-
         on_audio_chunk.first_call = True
 
         self.stream.play_async(
@@ -341,50 +291,37 @@ class AudioOutProcessor:
             default_silence_duration=self.silence.default,
         )
 
-        time.sleep(0.1)  # give the stream a moment to start
-
-        # wait for stream end
+        time.sleep(0.1)
         while not self.quick_interrupted and self.stream.is_playing():
             time.sleep(0.001)
-
-        # final pause to let any last chunk arrive
         time.sleep(0.1)
-        self.synthesis_running = False
+        # clear running flag
+        self.synthesis_available.set()
         logger.info("Quick answer synthesis complete.")
 
     def abort_syntheses(self) -> None:
         self.quick_interrupted = True
         self.final_interrupted = True
         self.stream.stop()
-
-        while True:
-            try:
-                self.quick_answer_audio_chunks.get_nowait()
-            except asyncio.QueueEmpty:
-                break
-        while True:
-            try:
-                self.final_answer_audio_chunks.get_nowait()
-            except asyncio.QueueEmpty:
-                break
-
-        # self.quick_answer_audio_chunks = asyncio.Queue()
-        # self.final_answer_audio_chunks = asyncio.Queue()
-
-        self.synthesis_running = False
-
+        for q in (self.quick_answer_audio_chunks, self.final_answer_audio_chunks):
+            while True:
+                try:
+                    q.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+        self.synthesis_available.set()
 
     def abort_synthesis_quick(self) -> None:
         self.quick_interrupted = True
         self.stream.stop()
         self.quick_answer_audio_chunks = asyncio.Queue()
-        self.synthesis_running = False
+        self.synthesis_available.set()
 
     def abort_synthesis_final(self) -> None:
         self.final_interrupted = True
         self.stream.stop()
         self.final_answer_audio_chunks = asyncio.Queue()
-        self.synthesis_running = False
+        self.synthesis_available.set()
 
     def close_wav_files(self):
         """Call this method to finalize and close the WAV files once synthesis is complete."""
