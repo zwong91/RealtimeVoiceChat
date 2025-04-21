@@ -23,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.responses import HTMLResponse, Response, FileResponse
 
 USE_SSL = False
-START_ENGINE = "coqui"
+START_ENGINE = "kokoro"
 
 if sys.platform == "win32":
     # Use the selector loop instead of proactor on Windows
