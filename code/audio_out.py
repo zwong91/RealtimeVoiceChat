@@ -61,6 +61,7 @@ class AudioOutProcessor:
         self.final_interrupted = False
         self.synthesis_running = False
         self.synthesis_final_running = False
+        self.synthesis_quick_running = False
         # use Event instead of bool
         self.synthesis_available = threading.Event()
         self.synthesis_available.set()
@@ -190,7 +191,7 @@ class AudioOutProcessor:
     def start_synthesis_final_thread(self, generator, source) -> threading.Thread:
         """Start the synthesis_final process in a new thread."""
         if self.synthesis_final_running:
-            logger.warning(f"👄💥💥💥Synthesis final already running, aborting new thread, source: {source}")
+            logger.warning(f"👄💥 Synthesis final already running, aborting new thread, source: {source}")
             return None
 
         logger.info(f"Starting synthesis final thread for source: {source}")
@@ -202,7 +203,12 @@ class AudioOutProcessor:
 
     def start_synthesis_quick_thread(self, text: str) -> threading.Thread:
         """Start the synthesis_quick process in a new thread."""
+        if self.synthesis_quick_running:
+            logger.warning(f"👄💥 Synthesis quick already running, aborting new thread")
+            return None
+
         self.synthesis_running = True
+        self.synthesis_quick_running = True
         t = threading.Thread(target=self.synthesis_quick, args=(text,))
         t.start()
         return t
@@ -367,6 +373,7 @@ class AudioOutProcessor:
 
         # clear running flag
         self.synthesis_running = False
+        self.synthesis_quick_running = False
         self.synthesis_available.set()
         logger.info("Quick answer synthesis complete.")
 
