@@ -17,7 +17,7 @@ Silence = namedtuple("Silence", ("comma", "sentence", "default"))
 ENGINE_SILENCES = {
     "coqui":   Silence(comma=0.3, sentence=0.6, default=0.3),
     "kokoro":  Silence(comma=0.3, sentence=0.6, default=0.3),
-    "orpheus": Silence(comma=0, sentence=0, default=0),
+    "orpheus": Silence(comma=0.3, sentence=0.6, default=0.3),
 }
 
 logger = logging.getLogger(__name__)
@@ -59,10 +59,12 @@ class AudioOutProcessor:
 
         self.quick_interrupted = False
         self.final_interrupted = False
+        self.synthesis_running = False
+        self.synthesis_final_running = False
         # use Event instead of bool
         self.synthesis_available = threading.Event()
         self.synthesis_available.set()
-
+        self.synthesis_count = 0
 
         self.current_stream_chunk_size = QUICK_ANSWER_STREAM_CHUNK_SIZE
 
@@ -88,6 +90,7 @@ class AudioOutProcessor:
             self.upsampled_wave.setframerate(48000)
 
         from RealtimeTTS import TextToAudioStream
+        logger.info(f"Initializing TTS engine: {engine}")
         if engine == "coqui":
             ensure_lasinya_models(models_root="models", model_name="Lasinya")
             from RealtimeTTS import CoquiEngine
@@ -109,8 +112,14 @@ class AudioOutProcessor:
             )
         else:
             from RealtimeTTS import OrpheusEngine, OrpheusVoice
-            self.engine = OrpheusEngine(model="isaiahbjork/orpheus-3b-0.1-ft")
-            voice = OrpheusVoice("tara")
+            self.engine = OrpheusEngine(
+                model="orpheus_3b-1basegguf@q4_k_m",
+                temperature=0.8,
+                top_p=0.95,
+                repetition_penalty=1.1,
+                max_tokens=1200,
+            )
+            voice = OrpheusVoice("baddy")
             self.engine.set_voice(voice)
 
         # Create a TextToAudioStream that handles streaming audio from the engine.
@@ -127,6 +136,10 @@ class AudioOutProcessor:
     def _on_stream_stop(self):
         """Callback when the audio stream stops."""
         logger.info("Audio stream stopped.")
+
+    def are_queues_empty(self) -> bool:
+        """Check if both audio queues are empty."""
+        return self.quick_answer_audio_chunks.empty() and self.final_answer_audio_chunks.empty() and self.quick_answer_audio_chunks.qsize() == 0 and self.final_answer_audio_chunks.qsize() == 0
 
     def _create_generator(self, text: str):
         """Create a generator that yields text once."""
@@ -174,23 +187,35 @@ class AudioOutProcessor:
             return base64.b64encode(pcm).decode('utf-8')
         return None
 
-    def start_synthesis_final_thread(self, generator) -> threading.Thread:
+    def start_synthesis_final_thread(self, generator, source) -> threading.Thread:
         """Start the synthesis_final process in a new thread."""
-        t = threading.Thread(target=self.synthesis_final, args=(generator,))
+        if self.synthesis_final_running:
+            logger.warning(f"👄💥💥💥Synthesis final already running, aborting new thread, source: {source}")
+            return None
+
+        logger.info(f"Starting synthesis final thread for source: {source}")
+        self.synthesis_running = True
+        self.synthesis_final_running = True
+        t = threading.Thread(target=self.synthesis_final, args=(generator, source, ))
         t.start()
         return t
 
     def start_synthesis_quick_thread(self, text: str) -> threading.Thread:
         """Start the synthesis_quick process in a new thread."""
+        self.synthesis_running = True
         t = threading.Thread(target=self.synthesis_quick, args=(text,))
         t.start()
         return t
 
-    def synthesis_final(self, generator) -> None:
+    def synthesis_final(self, generator, source) -> None:
 
+        time_start = time.time()
+        self.synthesis_count += 1
+        # logger.info(f"👄 Final Synthesis Wait (Source: {source}, Count: {self.synthesis_count}")
         self.synthesis_available.wait()
-        # now take it
-        logger.info("Synthesizing final answer")
+        time_from_start = time.time() - time_start
+        milliseconds_time_from_start = int(time_from_start * 1000)
+        # logger.info(f"👄 Final Synthesis Start (Source: {source}, Count: {self.synthesis_count}, Waited: {milliseconds_time_from_start}ms)")
         self.synthesis_available.clear()
 
         start = time.time()
@@ -201,32 +226,71 @@ class AudioOutProcessor:
             self.engine.set_stream_chunk_size(FINAL_ANSWER_STREAM_CHUNK_SIZE)
             self.current_stream_chunk_size = FINAL_ANSWER_STREAM_CHUNK_SIZE
 
+        buffer, good_streak, buffering, buf_dur = [], 0, True, 0.0
+        SR, BPS = 24000, 2
+
         def on_audio_chunk(chunk: bytes):
+            nonlocal buffer, good_streak, buffering, buf_dur
             if self.final_interrupted:
-                logger.info("Final audio stream interrupted.")
+                logger.info("Quick audio stream interrupted.")
                 return
+            now = time.time()
+            samples = len(chunk) // BPS
+            play = samples / SR
+
             if on_audio_chunk.first_call:
                 on_audio_chunk.first_call = False
-                logger.info(f"Final audio start. TTFT: {time.time()-start:.2f}s")
-            self.final_answer_audio_chunks.put_nowait(chunk)
+                self._final_prev_chunk_time = now
+                logger.info(f"Final audio start. TTFT: {now-start:.2f}s")
+            else:
+                gap = now - self._final_prev_chunk_time
+                self._final_prev_chunk_time = now
+                if gap <= play:
+                    logger.info(f"👄✅ Final chunk ok (gap={gap:.3f}s ≤ {play:.3f}s)")
+                    good_streak += 1
+                else:
+                    logger.warning(f"👄❌ Final chunk slow (gap={gap:.3f}s > {play:.3f}s)")
+                    good_streak = 0
+
+            buffer.append(chunk)
+            if buffering:
+                buf_dur += play
+                if good_streak >= 2 or buf_dur >= 1.0:
+                    for c in buffer:
+                        self.final_answer_audio_chunks.put_nowait(c)
+                    buffer.clear()
+                    buffering = False
+            else:
+                self.final_answer_audio_chunks.put_nowait(chunk)
         on_audio_chunk.first_call = True
 
-        self.stream.play_async(
+        play_kwargs = dict(
             log_synthesized_text=True,
             on_audio_chunk=on_audio_chunk,
-            fast_sentence_fragment=False,
             muted=True,
+            fast_sentence_fragment=False,
             comma_silence_duration=self.silence.comma,
             sentence_silence_duration=self.silence.sentence,
             default_silence_duration=self.silence.default,
+            force_first_fragment_after_words=999999,
         )
+
+        if self.engine_name == "orpheus":
+            play_kwargs["minimum_sentence_length"] = 200
+            play_kwargs["minimum_first_fragment_length"] = 200
+
+        self.stream.play_async(**play_kwargs)
+
 
         time.sleep(0.1)
         while not self.final_interrupted and self.stream.is_playing():
             time.sleep(0.001)
         time.sleep(0.1)
+
         # clear running flag
+        self.synthesis_running = False
         self.synthesis_available.set()
+        self.synthesis_final_running = False
         logger.info("Final answer synthesis complete.")
 
     def synthesis_quick(self, text: str) -> None:
@@ -264,10 +328,10 @@ class AudioOutProcessor:
                 gap = now - self._quick_prev_chunk_time
                 self._quick_prev_chunk_time = now
                 if gap <= play:
-                    logger.info(f"👄✅ Chunk ok (gap={gap:.3f}s ≤ {play:.3f}s)")
+                    logger.info(f"👄✅ Quick chunk ok (gap={gap:.3f}s ≤ {play:.3f}s)")
                     good_streak += 1
                 else:
-                    logger.warning(f"👄❌ Chunk slow (gap={gap:.3f}s > {play:.3f}s)")
+                    logger.warning(f"👄❌ Quick chunk slow (gap={gap:.3f}s > {play:.3f}s)")
                     good_streak = 0
 
             buffer.append(chunk)
@@ -282,7 +346,7 @@ class AudioOutProcessor:
                 self.quick_answer_audio_chunks.put_nowait(chunk)
         on_audio_chunk.first_call = True
 
-        self.stream.play_async(
+        play_kwargs = dict(
             log_synthesized_text=True,
             on_audio_chunk=on_audio_chunk,
             muted=True,
@@ -291,11 +355,18 @@ class AudioOutProcessor:
             default_silence_duration=self.silence.default,
         )
 
+        if self.engine_name == "orpheus":
+            play_kwargs["minimum_sentence_length"] = 200
+
+        self.stream.play_async(**play_kwargs)
+
         time.sleep(0.1)
         while not self.quick_interrupted and self.stream.is_playing():
             time.sleep(0.001)
         time.sleep(0.1)
+
         # clear running flag
+        self.synthesis_running = False
         self.synthesis_available.set()
         logger.info("Quick answer synthesis complete.")
 
@@ -309,6 +380,8 @@ class AudioOutProcessor:
                     q.get_nowait()
                 except asyncio.QueueEmpty:
                     break
+        while self.synthesis_running:
+            time.sleep(0.01)
         self.synthesis_available.set()
 
     def abort_synthesis_quick(self) -> None:

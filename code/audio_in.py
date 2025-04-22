@@ -1,13 +1,9 @@
 import asyncio
 import logging
-import threading
-import time
-from typing import Optional, Callable, Tuple, List
-
+from typing import Optional, Callable
 import numpy as np
 from colors import Colors
 from scipy.signal import resample_poly
-
 from transcribe import TranscriptionProcessor
 
 logger = logging.getLogger(__name__)
@@ -25,12 +21,13 @@ class AudioInputProcessor:
     def __init__(
             self,
             language: str = "en",
+            is_orpheus: bool = False,
         ) -> None:
         self.last_partial_text: Optional[str] = None
         self.transcriber = TranscriptionProcessor(
             language,
             on_recording_start_callback=self._on_recording_start,
-            # silence_active_callback=self._on_silence_active,
+            is_orpheus=is_orpheus,
         )
         self.transcription_task = asyncio.create_task(self._run_transcription_loop())
         
@@ -78,7 +75,6 @@ class AudioInputProcessor:
         """Process incoming audio stream and detect interruptions."""
         while True:
             try:
-                await asyncio.sleep(0.001)
                 audio_data = await audio_queue.get()
                 if audio_data is None:
                     break  # Termination signal

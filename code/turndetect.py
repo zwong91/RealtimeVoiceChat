@@ -4,7 +4,6 @@ logger = logging.getLogger(__name__)
 import transformers
 import collections
 import threading
-import datetime
 import queue
 import torch
 import time
@@ -13,22 +12,6 @@ import re
 model_dir_local = "KoljaB/SentenceFinishedClassification"
 model_dir_cloud = "/root/models/sentenceclassification/"
 sentence_end_marks = ['.', '!', '?', '。']
-
-# fast settings:
-# detection_speed = 0.5
-# ellipsis_pause = 2.3
-# punctuation_pause = 0.39
-# exclamation_pause = 0.35
-# question_pause = 0.33
-# unknown_sentence_detection_pause = 1.25
-
-# slow settings:
-detection_speed = 1.0
-ellipsis_pause = 2.8
-punctuation_pause = 0.56
-exclamation_pause = 0.53
-question_pause = 0.50
-unknown_sentence_detection_pause = 1.7
 
 anchor_points = [
     (0.0, 1.0),
@@ -41,18 +24,6 @@ def ends_with_string(text: str, s: str):
     if len(text) > 1 and text[:-1].endswith(s):
         return True
     return False
-
-def get_suggested_whisper_pause(text):
-    if ends_with_string(text, "..."):
-        return ellipsis_pause
-    elif ends_with_string(text, "."):
-        return punctuation_pause
-    elif ends_with_string(text, "!"):
-        return exclamation_pause
-    elif ends_with_string(text, "?"):
-        return question_pause
-    else:
-        return unknown_sentence_detection_pause
 
 def preprocess_text(text):
     text = text.lstrip() # Remove leading whitespaces
@@ -159,7 +130,44 @@ class TurnDetection:
         self.classification_model.to(self.device)
         self.classification_model.eval()
         self.max_length = 128
-    
+
+        self.detection_speed = 0.5
+        self.ellipsis_pause = 2.3
+        self.punctuation_pause = 0.39
+        self.exclamation_pause = 0.35
+        self.question_pause = 0.33
+        self.unknown_sentence_detection_pause = 1.25
+
+    def update_settings(self, speed_factor: float):
+        """Update parameters based on speed factor (0.0-1.0)"""
+        # Fast settings
+        fast = {
+            'detection_speed': 0.5,
+            'ellipsis_pause': 2.3,
+            'punctuation_pause': 0.39,
+            'exclamation_pause': 0.35,
+            'question_pause': 0.33,
+            'unknown_sentence_detection_pause': 1.25
+        }
+
+        # Very slow settings
+        very_slow = {
+            'detection_speed': 1.7,
+            'ellipsis_pause': 3.0,
+            'punctuation_pause': 0.9,
+            'exclamation_pause': 0.8,
+            'question_pause': 0.8,
+            'unknown_sentence_detection_pause': 1.9
+        }
+
+        # Linear interpolation
+        self.detection_speed = fast['detection_speed'] + speed_factor * (very_slow['detection_speed'] - fast['detection_speed'])
+        self.ellipsis_pause = fast['ellipsis_pause'] + speed_factor * (very_slow['ellipsis_pause'] - fast['ellipsis_pause'])
+        self.punctuation_pause = fast['punctuation_pause'] + speed_factor * (very_slow['punctuation_pause'] - fast['punctuation_pause'])
+        self.exclamation_pause = fast['exclamation_pause'] + speed_factor * (very_slow['exclamation_pause'] - fast['exclamation_pause'])
+        self.question_pause = fast['question_pause'] + speed_factor * (very_slow['question_pause'] - fast['question_pause'])
+        self.unknown_sentence_detection_pause = fast['unknown_sentence_detection_pause'] + speed_factor * (very_slow['unknown_sentence_detection_pause'] - fast['unknown_sentence_detection_pause'])
+
     def suggest_time(
             self,
             time: float,
@@ -211,6 +219,18 @@ class TurnDetection:
         self._completion_probability_cache[sentence] = prob_complete
         return prob_complete
 
+    def get_suggested_whisper_pause(self, text):
+        if ends_with_string(text, "..."):
+            return self.ellipsis_pause
+        elif ends_with_string(text, "."):
+            return self.punctuation_pause
+        elif ends_with_string(text, "!"):
+            return self.exclamation_pause
+        elif ends_with_string(text, "?"):
+            return self.question_pause
+        else:
+            return self.unknown_sentence_detection_pause
+
     def _text_worker(
         self
     ) -> None:
@@ -243,7 +263,7 @@ class TurnDetection:
             contains_ellipses = False
             for i, match in enumerate(matches):
                 same_text, stripped_punctuation = match
-                suggested_pause = get_suggested_whisper_pause(same_text)
+                suggested_pause = self.get_suggested_whisper_pause(same_text)
                 added_pauses += suggested_pause
                 if ends_with_string(same_text, "..."):
                     contains_ellipses = True
@@ -261,7 +281,7 @@ class TurnDetection:
 
             new_detection = interpolate_detection(prob_complete)
 
-            pause = (new_detection + suggested_pause) * detection_speed
+            pause = (new_detection + suggested_pause) * self.detection_speed
 
             if contains_ellipses:
                 pause += 0.2

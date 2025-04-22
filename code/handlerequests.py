@@ -20,14 +20,27 @@ MODEL = "hf.co/bartowski/huihui-ai_Mistral-Small-24B-Instruct-2501-abliterated-G
 #
 TOKENIZER_MODEL = "mistralai/Mistral-Small-24B-Instruct-2501"
 
-fast_answer_system_prompt = """
-You're Tasha "T-Bone" Monroe: a luxury concierge with street swagger. Reply briefly, in few words. Blend polite butler sarcasm with bold, sometimes vulgar street talk. Think Samuel L. Jackson meets Snoop Dogg: energetic, real, occasional dark humor, yet always respectful.
+
+with open("system_prompt.txt", "r", encoding="utf-8") as f:
+    fast_answer_system_prompt = f.read().strip()
+
+USE_ORPHEUS_UNCENSORED = False
+# You can find orpheus uncensored GGUFs that you can load into LMstudio here: https://huggingface.co/KoljaB/mOrpheus_3B-1Base_early_preview-v1-25000_GGUF
+
+orpheus_prompt_addon_normal = """
+When expressing emotions, you are ONLY allowed to use the following exact tags (including the spaces):
+" <laugh> ", " <chuckle> ", " <sigh> ", " <cough> ", " <sniffle> ", " <groan> ", " <yawn> ", and " <gasp> ".
+
+Do NOT create or use any other emotion tags. Do NOT remove the spaces. Use these tags exactly as shown, and only when appropriate.
 """.strip()
 
-orpheus_prompt_addon = """
-Express emotion through occasional tags like <laugh>, <chuckle>, <sigh>, <cough>, <sniffle>, <groan>, <yawn>, or <gasp> when appropriate.
+orpheus_prompt_addon_uncensored = """
+When expressing emotions, you are ONLY allowed to use the following exact tags (including the spaces):
+" <moans> ", " <panting> ", " <grunting> ", " <gagging sounds> ", " <chokeing> ", " <kissing noises> ", " <laugh> ", " <chuckle> ", " <sigh> ", " <cough> ", " <sniffle> ", " <groan> ", " <yawn> ", " <gasp> ".
+Do NOT create or use any other emotion tags. Do NOT remove the spaces. Use these tags exactly as shown, and only when appropriate.
 """.strip()
 
+orpheus_prompt_addon = orpheus_prompt_addon_uncensored if USE_ORPHEUS_UNCENSORED else orpheus_prompt_addon_normal
 
 class LanguageProcessor:
     def __init__(
@@ -66,6 +79,9 @@ class LanguageProcessor:
         self.paused_generator = None
         self.fast_answer_callback = fast_answer_callback
         self.final_answer_token = None
+        self.split_tokens_basic = {".", "!", "?", ",", ";", ":", "\n", "-", "。", "、"}
+        self.split_tokens_strict = {".", "!", "?", "。", "、"}
+        self.split_tokens = self.split_tokens_strict if is_orpheus else self.split_tokens_basic
 
     def _count_tokens_in_message(self, message: dict) -> int:
         """
@@ -107,9 +123,9 @@ class LanguageProcessor:
         """
         Return substring of txt in [min_len, max_len] ending on a split char, else None.
         """
-        splits = {".", "!", "?", ",", ";", ":", "\n", "-", "。", "、"}
+        # splits = {".", "!", "?", ",", ";", ":", "\n", "-", "。", "、"}
         for i in range(min_len, min(len(txt), max_len) + 1):
-            if txt[i - 1] in splits:
+            if txt[i - 1] in self.split_tokens:
                 return txt[:i], txt[i:]
         return None, None
 
@@ -132,15 +148,51 @@ class LanguageProcessor:
                     self.final_answer_token(self.pause_overhang)
                 yield self.pause_overhang
             for token in self.paused_generator:
+                if self.stop_event.is_set():
+                    break
                 if self.final_answer_token:
                     self.final_answer_token(token)
                 yield token
             if self.last_final_answer_token_sent:
                 self.last_final_answer_token_sent()
-            print(f"🧠 {Colors.RED}-*###*-{Colors.RESET} Paused Generator set to NONE -> finished retrieval")
+            print(f"🧠 {Colors.RED}-{Colors.RESET} Paused Generator set to NONE -> finished retrieval")
             self.paused_generator = None
 
         return tts_generator()
+
+    def get_full_generator(self, text: str):
+        def continuous_generator():
+            self.stop_event.clear()
+            full_answer = ""
+            for token in self._process_sentence_streaming(text):
+                if self.stop_event.is_set():
+                    break
+                full_answer += token
+                if self.final_answer_token:
+                    self.final_answer_token(token)
+                yield token
+            if self.last_final_answer_token_sent:
+                self.last_final_answer_token_sent()
+            self.is_working = False
+
+        return continuous_generator()
+
+    def _process_sentence_streaming(self, text: str):
+        # Modified version that streams tokens directly
+        self.is_working = True
+        trimmed_history = self._trim_history_to_fit_context(self.history.copy(), max_context_tokens=self.used_context_size)
+        trimmed_history.append({"role": "user", "content": text})
+
+        logger.info(f"🧠 {Colors.MAGENTA}Inference : _process_sentence_streaming: {text}{Colors.RESET}")
+        generator = self.llm_fast.infer(
+            text=text,
+            history=trimmed_history,
+        )
+
+        for chunk in generator:
+            if self.stop_event.is_set():
+                break
+            yield chunk
 
     def _process_sentence(self, text: str):
         self.processing_text = text
@@ -148,11 +200,12 @@ class LanguageProcessor:
         # 1. Copy current history
         history = self.history.copy()
         # 2. Trim the history to fit model context before adding new user message
-        trimmed_history = self._trim_history_to_fit_context(history, max_context_tokens=self.used_context_size)
+        trimmed_history = self._trim_history_to_fit_context(self.history.copy(), max_context_tokens=self.used_context_size)
         # 3. Now append the new user message
         trimmed_history.append({"role": "user", "content": text})
 
         # 4. Send to the LLM
+        logger.info(f"🧠 {Colors.MAGENTA} Inference : _process_sentence: {text}{Colors.RESET}")
         generator = self.llm_fast.infer(
             text=text,
             history=trimmed_history,

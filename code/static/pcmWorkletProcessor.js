@@ -1,18 +1,20 @@
 // static/pcmWorkletProcessor.js
 class PCMWorkletProcessor extends AudioWorkletProcessor {
-    process(inputs, outputs, parameters) {
-      // inputs[0] is the array of channels for the single input node
-      // We only care about the first channel (mono)
-      const inputChannelData = inputs[0][0];
-      if (inputChannelData) {
-        // Post the Float32Array back to the main thread for conversion/sending
-        this.port.postMessage(inputChannelData);
+  process(inputs) {
+    const in32 = inputs[0][0];
+    if (in32) {
+      // convert Float32 → Int16 in the worklet
+      const int16 = new Int16Array(in32.length);
+      for (let i = 0; i < in32.length; i++) {
+        let s = in32[i];
+        s = s < -1 ? -1 : s > 1 ? 1 : s;
+        int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
       }
-      // Return true to keep the processor alive
-      return true;
+      // send raw ArrayBuffer, transferable
+      this.port.postMessage(int16.buffer, [int16.buffer]);
     }
+    return true;
   }
-  
-  // Register the processor under a chosen name
-  registerProcessor('pcm-worklet-processor', PCMWorkletProcessor);
-  
+}
+
+registerProcessor('pcm-worklet-processor', PCMWorkletProcessor);

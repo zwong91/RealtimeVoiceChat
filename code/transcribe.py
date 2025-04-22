@@ -42,6 +42,7 @@ class TranscriptionProcessor:
             before_final_sentence=None,
             silence_active_callback=None,
             on_recording_start_callback=None,
+            is_orpheus=False,
             local=True,
     ):
         self.source_language = source_language
@@ -53,6 +54,7 @@ class TranscriptionProcessor:
         self.before_final_sentence = before_final_sentence
         self.silence_active_callback = silence_active_callback
         self.on_recording_start_callback = on_recording_start_callback
+        self.is_orpheus = is_orpheus
         self.recorder = None
         self.is_silero_speech_active = False
         self.silero_working = False
@@ -66,6 +68,7 @@ class TranscriptionProcessor:
         self.shutdown_performed = False
         self.silence_time = 0
         self.silence_active = False
+        self.last_audio_copy = None
 
         if USE_TURN_DETECTION:
             logger.info(f"👂 {Colors.YELLOW}Turn detection enabled{Colors.RESET}")
@@ -104,6 +107,10 @@ class TranscriptionProcessor:
 
                     if potential_sentence_end_time > start_hot_condition - 0.1:
                         potential_sentence_end_time = start_hot_condition - 0.1
+
+                    if self.is_orpheus:
+                        if potential_sentence_end_time < silence_waiting_time - 0.35:
+                            potential_sentence_end_time = silence_waiting_time - 0.35
 
                     if time_since_silence > potential_sentence_end_time:
                         self.detect_potential_sentence_end(self.realtime_text)
@@ -258,10 +265,21 @@ class TranscriptionProcessor:
             if self.silence_active_callback:
                 self.silence_active_callback(silence_active)
 
+    def get_last_audio_copy(self):
+        audio_copy = self.get_audio_copy()
+
+        if audio_copy is not None and len(audio_copy) > 0:
+            self.last_audio_copy = audio_copy
+            return audio_copy
+        else:
+            return self.last_audio_copy
+
     def get_audio_copy(self):
         full_audio_array = np.frombuffer(b''.join(self.recorder.frames), dtype=np.int16)
         full_audio = full_audio_array.astype(np.float32) / INT16_MAX_ABS_VALUE
         audio_bytes = copy.deepcopy(full_audio)
+        if audio_bytes is not None and len(audio_bytes) > 0:
+            self.last_audio_copy = audio_bytes
         return audio_bytes
 
     def _create_recorder(self):
