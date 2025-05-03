@@ -42,8 +42,8 @@ The system captures microphone audio from a web client, streams it to a Python b
 
 *   Python 3.9 or higher recommended.
 *   Windows recommended.
-*   A CUDA-enabled **STRONG** GPU is highly recommended for faster STT/TTS performance (especially for Coqui TTS and larger Whisper models). The installation script assumes CUDA 12.4 (`cu124`). Adjust if necessary.
-*   **(Optional) Ollama:** If using the Ollama backend for the LLM, ensure it is installed and running. Pull the desired model (e.g., `ollama pull hf.co/bartowski/huihui-ai_Mistral-Small-24B-Instruct-2501-abliterated-GGUF:Q4_K_M`), set in handlerequests.py as MODEL parameter.
+*   A CUDA-enabled **STRONG** GPU is highly recommended for faster STT/TTS performance (especially for Coqui TTS and larger Whisper models). The installation script assumes CUDA 12.1 (`cu121`). Adjust if necessary.
+*   **(Optional) Ollama:** If using the Ollama backend for the LLM, ensure it is installed and running. Pull the desired model (e.g., `ollama pull hf.co/bartowski/huihui-ai_Mistral-Small-24B-Instruct-2501-abliterated-GGUF:Q4_K_M`), set in server.py as LLM_START_MODEL parameter.
 *   **(Optional) OpenAI API Key:** If using the OpenAI backend, set the `OPENAI_API_KEY` environment variable or place it in a `.env` file.
 
 **Installation Steps:**
@@ -79,8 +79,8 @@ The system captures microphone audio from a web client, streams it to a Python b
     cd code
 
     # Install PyTorch with CUDA (adjust index-url for your CUDA version or CPU)
-    # Example for CUDA 12.4:
-    pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
+    # Example for CUDA 12.1:
+    pip install torch==2.5.1+cu121 torchaudio==2.5.1+cu121 torchvision --index-url https://download.pytorch.org/whl/cu121
     # Example for CPU only:
     # pip install torch torchaudio
 
@@ -117,7 +117,8 @@ Several aspects of the application can be configured by modifying the Python sou
 
 *   **TTS Engine (`server.py`, `audio_module.py`):**  
   Change `START_ENGINE` in `server.py` to "coqui", "kokoro", or "orpheus". Configure engine-specific settings (voice, speed, etc.) within `AudioProcessor.__init__` in `audio_module.py`. 
-  When you choose CoquiEngine, I recommend running DeepSpeed. On Linux, you can just `pip install deepspeed`, but on Windows you'll need to build it yourself. A handy tool for that is [deepspeedpatcher](https://github.com/erew123/deepspeedpatcher). When you compile, enable the “CUTLESS_OPS,” “SPARSE_ATTN,” and “INFERENCE_CORE_OPS” options. You'll have to install a few prerequisites first (check the repo's README), but the performance boost is well worth the extra setup.
+  When you choose CoquiEngine, I recommend running DeepSpeed. On Linux, you can just `pip install deepspeed`, but on Windows you'll need to build it yourself. A handy tool for that is [deepspeedpatcher](https://github.com/erew123/deepspeedpatcher). When you compile, enable the “CUTLESS_OPS,” “SPARSE_ATTN,” and “INFERENCE_CORE_OPS” options. You'll have to install a few prerequisites first (check the repo's README), but the performance boost is well worth the extra setup. You can also try installing a precompiled deepspeed wheel (like this one for torch 2.5.1: `pip install https://raw.githubusercontent.com/KoljaB/RealtimeVoiceChat/main/code/deepspeed_wheel/deepspeed-0.16.1%2Bunknown-cp310-cp310-win_amd64.whl`), also daswer123 has some on his github page.
+
 *   **LLM Model & Backend (`llm_module.py`):**
     *   Set the desired `LLM_START_MODEL` (e.g., Ollama model name or HF path) and `LLM_START_PROVIDER`  in `server.py`.
     *   Adjust system prompt in `system_prompt.txt`

@@ -1,6 +1,6 @@
 This wheel was built on Windows 11 using the `deepspeedpatcher` tool (https://github.com/erew123/deepspeedpatcher) with:
 
-- PyTorch 2.6.0  
+- PyTorch 2.5.1  
 - CUDA 12.1  
 - Python 3.10.9  
 - Enabled options: `CUTLASS_OPS`, `SPARSE_ATTN`, `INFERENCE_CORE_OPS`
