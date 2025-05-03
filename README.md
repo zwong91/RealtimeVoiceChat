@@ -55,7 +55,7 @@ The system captures microphone audio from a web client, streams it to a Python b
     ```
 
 2.  **Run the installation script (Windows):**
-    This script automates creating a virtual environment, upgrading pip, installing PyTorch with CUDA support, and installing all other dependencies from `requirements.txt`.
+    This script automates creating a virtual environment, upgrading pip, installing PyTorch 2.5.1 with CUDA 12.1 support and a suitable Deepspeed wheel and installing all other dependencies from `requirements.txt`.
     ```batch
     install.bat
     ```
@@ -98,6 +98,9 @@ The system captures microphone audio from a web client, streams it to a Python b
     ```
 
 2.  **Make sure you are in the `code` directory.**
+    ```bash
+    cd code
+    ```
 
 3.  **Start the FastAPI server:**
     ```bash
