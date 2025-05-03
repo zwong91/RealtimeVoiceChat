@@ -50,8 +50,8 @@ The system captures microphone audio from a web client, streams it to a Python b
 
 1.  **Clone the repository:**
     ```bash
-    git clone <repository-url>
-    cd <repository-directory>
+    git clone https://github.com/KoljaB/RealtimeVoiceChat.git
+    cd RealtimeVoiceChat
     ```
 
 2.  **Run the installation script (Windows):**
