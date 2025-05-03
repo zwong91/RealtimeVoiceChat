@@ -15,6 +15,8 @@
 
 const statusDiv = document.getElementById("status");
 const messagesDiv = document.getElementById("messages");
+const speedSlider = document.getElementById("speedSlider");
+speedSlider.disabled = true;  // start disabled
 
 let socket = null;
 let audioContext = null;
@@ -94,7 +96,7 @@ async function startRawPcmCapture() {
         sampleRate: { ideal: 24000 },
         channelCount: 1,
         echoCancellation: true,
-        autoGainControl: true,
+        // autoGainControl: true,
         noiseSuppression: true
       }
     });
@@ -279,7 +281,7 @@ document.getElementById("clearBtn").onclick = () => {
   }
 };
 
-document.getElementById("speedSlider").addEventListener("input", (e) => {
+speedSlider.addEventListener("input", (e) => {
   const speedValue = parseInt(e.target.value);
   if (socket && socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify({
@@ -304,6 +306,7 @@ document.getElementById("startBtn").onclick = async () => {
     statusDiv.textContent = "Connected. Activating mic and TTS…";
     await startRawPcmCapture();
     await setupTTSPlayback();
+    speedSlider.disabled = false; 
   };
 
   socket.onmessage = (evt) => {
@@ -321,12 +324,14 @@ document.getElementById("startBtn").onclick = async () => {
     statusDiv.textContent = "Connection closed.";
     flushRemainder();
     cleanupAudio();
+    speedSlider.disabled = true;
   };
 
   socket.onerror = (err) => {
     statusDiv.textContent = "Connection error.";
     cleanupAudio();
     console.error(err);
+    speedSlider.disabled = true; 
   };
 };
 
@@ -337,6 +342,16 @@ document.getElementById("stopBtn").onclick = () => {
   }
   cleanupAudio();
   statusDiv.textContent = "Stopped.";
+};
+
+document.getElementById("copyBtn").onclick = () => {
+  const text = chatHistory
+    .map(msg => `${msg.role.charAt(0).toUpperCase() + msg.role.slice(1)}: ${msg.content}`)
+    .join('\n');
+  
+  navigator.clipboard.writeText(text)
+    .then(() => console.log("Conversation copied to clipboard"))
+    .catch(err => console.error("Copy failed:", err));
 };
 
 // First render

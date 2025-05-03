@@ -1,6 +1,14 @@
-realtimestt==0.3.103
-realtimetts[kokoro,coqui,orpheus]==0.5.3
+# speech to text and text to speech
+realtimestt==0.3.104
+realtimetts[kokoro,coqui,orpheus]==0.5.5
+
+# webserver dependencies
 fastapi
 uvicorn
+
+# configuration
 python-dotenv
+
+# llm providers
 ollama
+openai
