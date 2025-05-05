@@ -1,6 +1,8 @@
 # Real-Time AI Voice Chat 🎤💬🧠🔊
 
-*early preview - current state still contains lots of bugs and unsolved edge cases*
+*early preview - first version out now that I consider reasonably stable - but it's still early days!*
+
+https://github.com/user-attachments/assets/16cc29a7-bec2-4dd0-a056-d213db798d8f
 
 https://github.com/user-attachments/assets/16cc29a7-bec2-4dd0-a056-d213db798d8f
 
