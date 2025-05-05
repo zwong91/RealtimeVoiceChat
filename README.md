@@ -50,8 +50,6 @@ The system captures microphone audio from a web client, streams it to a Python b
 *   **(Optional) Ollama:** If using the Ollama backend *outside* of Docker, ensure it is installed and running. Pull the desired model manually. The Docker Compose setup handles Ollama installation and provides commands to pull models.
 *   **(Optional) OpenAI API Key:** If using the OpenAI backend, set the `OPENAI_API_KEY` environment variable or place it in a `.env` file (or pass it as an environment variable to Docker, e.g., in your `docker-compose.yml` or via command line).
 
-<details>
-
 <summary><strong>Installation Steps</strong> (Click to expand/collapse)</summary>
 
 **Clone the repository:**
@@ -168,8 +166,6 @@ This script automates creating a virtual environment, upgrading pip, installing 
     ```bash
     pip install -r requirements.txt
     ```
-
-</details>
 
 ## Running the Application
 
