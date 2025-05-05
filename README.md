@@ -4,8 +4,6 @@
 
 https://github.com/user-attachments/assets/16cc29a7-bec2-4dd0-a056-d213db798d8f
 
-https://github.com/user-attachments/assets/16cc29a7-bec2-4dd0-a056-d213db798d8f
-
 Implements a real-time, voice-based chat application where users can speak directly to an AI assistant and receive spoken responses, mimicking a natural conversation. It's based on a client-server low-latency communication architecture with WebSockets.
 
 ## Overview
