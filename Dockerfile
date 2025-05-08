@@ -51,7 +51,7 @@ RUN echo "Building DeepSpeed with flags: DS_BUILD_TRANSFORMER=${DS_BUILD_TRANSFO
     || (echo "DeepSpeed install failed. Check build logs above." && exit 1)
 
 # Copy requirements file first to leverage Docker cache
-COPY requirements.txt .
+COPY --chown=1001:1001 requirements.txt .
 
 # Install remaining Python dependencies from requirements.txt
 RUN pip install --no-cache-dir --prefer-binary -r requirements.txt \
@@ -61,7 +61,7 @@ RUN pip install --no-cache-dir --prefer-binary -r requirements.txt \
 RUN pip install --no-cache-dir "ctranslate2<4.5.0"
 
 # Copy the application code
-COPY code/ ./code/
+COPY --chown=1001:1001 code/ ./code/
 
 # --- Stage 2: Runtime Stage ---
 # Base image still needs CUDA toolkit for PyTorch/DeepSpeed/etc in the app
@@ -97,10 +97,10 @@ WORKDIR /app/code
 
 # Copy installed Python packages from the builder stage
 RUN mkdir -p /usr/local/lib/python3.10/dist-packages
-COPY --from=builder /usr/local/lib/python3.10/dist-packages /usr/local/lib/python3.10/dist-packages
+COPY --chown=1001:1001 --from=builder /usr/local/lib/python3.10/dist-packages /usr/local/lib/python3.10/dist-packages
 
 # Copy the application code from the builder stage
-COPY --from=builder /app/code /app/code
+COPY --chown=1001:1001 --from=builder /app/code /app/code
 
 # <<<--- Keep other model pre-downloads --->>>
 # <<<--- Silero VAD Pre-download --->>>
@@ -154,13 +154,12 @@ RUN groupadd --gid 1001 appgroup && \
 # The entrypoint will handle runtime permissions for volumes/cache
 RUN mkdir -p /home/appuser/.cache && \
     chown -R appuser:appgroup /app && \
-    chown -R appuser:appgroup /usr/local/lib/python3.10/dist-packages && \
     chown -R appuser:appgroup /home/appuser && \
     # Also chown the caches potentially populated by root during build
     if [ -d /root/.cache ]; then chown -R appuser:appgroup /root/.cache; fi
 
 # Copy and set permissions for entrypoint script
-COPY entrypoint.sh /entrypoint.sh
+COPY --chown=1001:1001 entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # --- REMOVED USER appuser --- The container will start as root.
