@@ -34,7 +34,7 @@ A sophisticated client-server system built for low-latency interaction:
 
 ## Technology Stack 🛠️
 
-*   **Backend:** Python 3.x, FastAPI
+*   **Backend:** Python < 3.13, FastAPI
 *   **Frontend:** HTML, CSS, JavaScript (Vanilla JS, Web Audio API, AudioWorklets)
 *   **Communication:** WebSockets
 *   **Containerization:** Docker, Docker Compose
