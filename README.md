@@ -266,6 +266,7 @@ https://medium.com/@lonligrin/improving-voice-ai-with-a-sentence-completeness-cl
 我使用实时转录，然后结合提示 whisper 在未完成的句子上添加省略号，以及上述模型来判断句子是否完整。
 这远非完美，但相较于使用单纯的沉默来说是一个实质性的改进。
 
+MPV 流 而不是 PCM
 ```python
 import os
 import random
