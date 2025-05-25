@@ -170,6 +170,14 @@ class AudioProcessor:
             sentence_silence_duration=self.silence.sentence,
             default_silence_duration=self.silence.default,
             force_first_fragment_after_words=999999, # Effectively disable this
+            #❗use these for chinese: minimum_sentence_length = 2, 
+            # minimum_first_fragment_length = 2, tokenizer="stanza", 
+            # language="zh", context_size=2            
+            minimum_sentence_length=2,
+            minimum_first_fragment_length=2,
+            tokenizer="stanza",
+            language="zh",
+            context_size=2,
         )
         self.stream.play(**play_kwargs) # Synchronous play for prewarm
         # Wait for prewarm to finish (indicated by on_audio_stream_stop)
@@ -379,6 +387,14 @@ class AudioProcessor:
             sentence_silence_duration=self.silence.sentence,
             default_silence_duration=self.silence.default,
             force_first_fragment_after_words=999999, # Don't force early fragments
+            #❗use these for chinese: minimum_sentence_length = 2, 
+            # minimum_first_fragment_length = 2, tokenizer="stanza", 
+            # language="zh", context_size=2            
+            minimum_sentence_length=2,
+            minimum_first_fragment_length=2,
+            tokenizer="stanza",
+            language="zh",
+            context_size=2,
         )
 
         logger.info(f"👄▶️ {generation_string} Quick Starting synthesis. Text: {text[:50]}...")
@@ -553,6 +569,15 @@ class AudioProcessor:
             sentence_silence_duration=self.silence.sentence,
             default_silence_duration=self.silence.default,
             force_first_fragment_after_words=999999,
+            
+            #❗use these for chinese: minimum_sentence_length = 2, 
+            # minimum_first_fragment_length = 2, tokenizer="stanza", 
+            # language="zh", context_size=2            
+            minimum_sentence_length=2,
+            minimum_first_fragment_length=2,
+            tokenizer="stanza",
+            language="zh",
+            context_size=2,
         )
 
         # Add Orpheus specific parameters for generator streaming
