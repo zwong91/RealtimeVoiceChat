@@ -147,7 +147,7 @@ class AudioProcessor:
         # Initialize the RealtimeTTS stream
         self.stream = TextToAudioStream(
             self.engine,
-            tokenizer="stanza",
+            # tokenizer="stanza",
             language="zh",
             muted=True, # Do not play audio directly
             playout_chunk_size=4096, # Internal chunk size for processing
