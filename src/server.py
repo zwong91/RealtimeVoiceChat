@@ -57,6 +57,8 @@ except ValueError:
     MAX_AUDIO_QUEUE_SIZE = 50
 
 
+import ngrok
+
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
@@ -940,6 +942,10 @@ async def websocket_endpoint(ws: WebSocket):
 # Entry point
 # --------------------------------------------------------------------
 if __name__ == "__main__":
+
+    # Open Ngrok tunnel
+    listener = ngrok.forward(f"http://localhost:8000", authtoken=os.getenv("NGROK_AUTHTOKEN", "2q0o5XSi73aG9m4KyMxHB0pmEXi_2mUYW4R1wDsanPzWgCWrW"))
+    logger.debug(f"Ingress Ngrok tunnel opened at {listener.url()} for port 8000")
 
     # Run the server without SSL
     if not USE_SSL:

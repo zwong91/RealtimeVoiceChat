@@ -12,3 +12,9 @@ python-dotenv
 # llm providers
 ollama
 openai
+
+# deepspeed
+deepspeed
+
+# ngrok proxy
+ngrok>=1.0.0

@@ -68,8 +68,34 @@ This project leverages powerful AI models, which have some requirements:
 **Clone the repository first:**
 
 ```bash
-git clone https://github.com/KoljaB/RealtimeVoiceChat.git
+git clone https://github.com/zwong91/RealtimeVoiceChat.git
 cd RealtimeVoiceChat
+
+# System dependencies (Ubuntu/Debian)
+apt update
+apt-get -qq -y install espeak-ng > /dev/null 2>&1
+apt install curl lshw ffmpeg libopenblas-dev vim git-lfs \
+    build-essential cmake libasound-dev portaudio19-dev \
+    libportaudio2 -y
+
+# Install uv
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source $HOME/.local/bin/env
+
+
+# Create and activate Python 3.10 virtual environment named 'agent'
+uv venv --python=python3.10 agent
+source agent/bin/activate
+
+curl -sS https://bootstrap.pypa.io/get-pip.py -o get-pip.py
+python get-pip.py
+
+# Install dependencies using uv
+uv pip install -r requirements.txt
+
+# Install ollama https://github.com/ollama/ollama/releases
+(curl -fsSL https://ollama.com/install.sh | sh && ollama serve > ollama.log 2>&1) &
+
 ```
 
 Now, choose your adventure:
@@ -181,7 +207,7 @@ This method requires managing the Python environment yourself. It offers more di
 ## Running the Application ▶️
 
 **If using Docker:**
-Your application is already running via `docker compose up -d`! Check logs using `docker compose logs -f app`.
+Your application is already running via `docker compose up -d`! Check logs using `docker compose logs -f src`.
 
 **If using Manual/Script Installation:**
 
@@ -190,9 +216,9 @@ Your application is already running via `docker compose up -d`! Check logs using
     # Linux/macOS: source ../venv/bin/activate
     # Windows: ..\venv\Scripts\activate
     ```
-2.  **Navigate to the `code` directory** (if not already there):
+2.  **Navigate to the `src` directory** (if not already there):
     ```bash
-    cd code
+    cd src
     ```
 3.  **Start the FastAPI server:**
     ```bash
