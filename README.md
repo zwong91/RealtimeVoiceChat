@@ -239,6 +239,272 @@ Want to tweak the AI's voice, brain, or how it listens? Modify the Python files 
 
 ---
 
+## Q & A
+/ws 在多个 websocket 连接期间，音频片段等内容可能会被覆盖。在垂直扩展这样的项目时，有很多瓶颈需要处理。
+最糟糕的情况是两个或更多用户几乎同时完成他们的句子。这时会出现峰值 GPU 负载，并且在这种情况下无法保证低延迟。
+此外，RealtimeSTT 和 RealtimeTTS 都无法处理多个并行请求。因此，目前每个实例实际上只能支持一个用户，否则你需要进行横向扩展。
+
+进行垂直扩展则在每个新的 websocket 连接上初始化 AudioInputProcessor 以及其他类，
+RealtimeSTT 和 RealtimeTTS 都无法处理并行请求，而这在多个用户场景中是必需的。
+延迟下降将非常明显，整体性能将大大受损。即使只有一个用户，RealtimeVoiceChat 也确实需要一块相当强大的 GPU 才能顺畅运行。
+
+ollama run hf.co/bartowski/huihui-ai_Mistral-Small-24B-Instruct-2501-abliterated-GGUF:Q4_K_M
+
+24GB 显存（RTX 3090/4090) 运行当前模型的首次令牌时间TTFT 为 0.0563 秒，推理速度为 52.85 token/秒。
+16GB 的话则 首次令牌时间低于 100 毫秒，速度超过 30 个令牌每秒。Holy fuck LLM: 139.02ms, TTS: 59.90ms
+
+
+"Unable to load any of {libcudnn_ops.so.9.1.0, libcudnn_ops.so.9.1, libcudnn_ops.so.9, libcudnn_ops.so}" error
+pip install "ctranslate2<4.5.0"
+
+
+turn detection KoljaB/SentenceFinishedClassification
+sentence binary classification model
+
+https://medium.com/@lonligrin/improving-voice-ai-with-a-sentence-completeness-classifier-2da6e950538a
+基于 Silero-VAD 的转弯检测仅在用户停止说话后使用固定的沉默时间，然后决定“转弯结束”。这非常幼稚。
+我使用实时转录，然后结合提示 whisper 在未完成的句子上添加省略号，以及上述模型来判断句子是否完整。
+这远非完美，但相较于使用单纯的沉默来说是一个实质性的改进。
+
+```python
+import os
+import random
+import torch
+import numpy as np
+import pandas as pd
+
+from datasets import Dataset
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import (
+    accuracy_score,
+    f1_score,
+    roc_auc_score,
+    matthews_corrcoef,
+    balanced_accuracy_score,
+)
+
+from transformers import (
+    DistilBertTokenizerFast,
+    DistilBertForSequenceClassification,
+    Trainer,
+    TrainingArguments,
+    EarlyStoppingCallback,
+)
+
+from torch.utils.tensorboard import SummaryWriter
+
+# -----------------------------
+# Configuration
+# -----------------------------
+data_dir = "dataset"
+complete_file = "dataset/filtered_complete_sentences.txt"
+incomplete_file = "dataset/filtered_incomplete_sentences.txt"
+# complete_file = os.path.join(data_dir, "complete_sentences.txt")
+# incomplete_file = os.path.join(data_dir, "incomplete_sentences.txt")
+
+model_name = "distilbert-base-uncased"
+output_dir = "./better-distil-finetuned_model"
+
+num_train_epochs = 30
+batch_size = 512
+learning_rate = 2e-5
+
+def set_seed(seed=42):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+set_seed(42)
+
+# -----------------------------
+# Load and prepare the dataset
+# -----------------------------
+def load_sentences(file_path, label):
+    with open(file_path, "r", encoding="utf-8") as f:
+        lines = f.read().strip().split("\n")
+    return [(line.strip().lower(), label) for line in lines if line.strip()]
+
+complete_data = load_sentences(complete_file, 1)    # label 1 for complete
+incomplete_data = load_sentences(incomplete_file, 0) # label 0 for incomplete
+
+all_data = complete_data + incomplete_data
+random.shuffle(all_data)
+
+df = pd.DataFrame(all_data, columns=["text", "label"])
+
+# Verify class counts
+print(f"Complete sentences: {df['label'].sum()}")
+print(f"Incomplete sentences: {len(df) - df['label'].sum()}")
+
+train_df, val_df = train_test_split(
+    df, 
+    test_size=0.1, 
+    random_state=42, 
+    stratify=df["label"]
+)
+
+tokenizer = DistilBertTokenizerFast.from_pretrained(model_name)
+
+def tokenize_fn(examples):
+    return tokenizer(
+        examples["text"], 
+        truncation=True, 
+        padding="max_length", 
+        max_length=128
+    )
+
+train_dataset_hf = Dataset.from_pandas(train_df.reset_index(drop=True))
+val_dataset_hf = Dataset.from_pandas(val_df.reset_index(drop=True))
+
+train_dataset_hf = train_dataset_hf.map(tokenize_fn, batched=True)
+val_dataset_hf = val_dataset_hf.map(tokenize_fn, batched=True)
+
+train_dataset_hf.set_format(type="torch", columns=["input_ids", "attention_mask", "label"])
+val_dataset_hf.set_format(type="torch", columns=["input_ids", "attention_mask", "label"])
+
+# -----------------------------
+# Model and Training Arguments
+# -----------------------------
+model = DistilBertForSequenceClassification.from_pretrained(
+    model_name,
+    num_labels=2
+)
+
+training_args = TrainingArguments(
+    output_dir=output_dir,
+    overwrite_output_dir=True,
+    evaluation_strategy="epoch",
+    save_strategy="epoch",
+    per_device_train_batch_size=batch_size,
+    per_device_eval_batch_size=batch_size,
+    num_train_epochs=num_train_epochs,
+    learning_rate=learning_rate,
+    logging_dir="./logs",
+    logging_steps=50,
+    load_best_model_at_end=True,
+    metric_for_best_model="accuracy",  # Use accuracy instead of the composite metric
+    greater_is_better=True,
+    save_total_limit=3,
+    weight_decay=0.01,
+    fp16=True,
+    report_to="none"
+)
+
+# -----------------------------
+# Composite Metric Computation
+# -----------------------------
+def compute_metrics(eval_pred):
+    logits, labels = eval_pred
+    predictions = np.argmax(logits, axis=1)
+
+    accuracy = accuracy_score(labels, predictions)
+    f1 = f1_score(labels, predictions, average="weighted")
+
+    # For ROC-AUC, we need the probability of the positive class
+    # logits[:,1] gives the predicted logits for the positive class
+    roc_auc = roc_auc_score(labels, logits[:,1])  
+    mcc = matthews_corrcoef(labels, predictions)
+    balanced_acc = balanced_accuracy_score(labels, predictions)
+
+    # Composite metric (adjust weights as needed)
+    composite_metric = (0.4 * f1) + (0.3 * roc_auc) + (0.2 * mcc) + (0.1 * balanced_acc)
+
+    return {
+        "accuracy": accuracy,
+        "f1": f1,
+        "roc_auc": roc_auc,
+        "mcc": mcc,
+        "balanced_accuracy": balanced_acc,
+        "composite_metric": composite_metric,
+    }
+
+# -----------------------------
+# Early Stopping Callback
+# -----------------------------
+callbacks = [
+    EarlyStoppingCallback(early_stopping_patience=10)
+]
+
+# -----------------------------
+# Custom Trainer for Logging
+# -----------------------------
+class CustomTrainer(Trainer):
+    def __init__(self, *args, **kwargs):
+        super(CustomTrainer, self).__init__(*args, **kwargs)
+        self.writer = SummaryWriter(log_dir="./tensorboard_logs")
+
+    def on_step_end(self, args, state, control, **kwargs):
+        # Log gradient norms
+        total_norm = 0
+        for p in self.model.parameters():
+            if p.grad is not None:
+                param_norm = p.grad.data.norm(2)
+                total_norm += param_norm.item() ** 2
+        total_norm = total_norm ** 0.5
+        self.writer.add_scalar("Grad Norm", total_norm, state.global_step)
+
+        # Log learning rate
+        current_lr = self._get_learning_rate()
+        self.writer.add_scalar("Learning Rate", current_lr, state.global_step)
+        super().on_step_end(args, state, control, **kwargs)
+
+    def _get_learning_rate(self):
+        # Assuming one parameter group
+        return self.optimizer.param_groups[0]['lr']
+
+    def on_train_end(self, args, state, control, **kwargs):
+        self.writer.close()
+        super().on_train_end(args, state, control, **kwargs)
+
+# -----------------------------
+# Initialize and Train
+# -----------------------------
+trainer = CustomTrainer(
+    model=model,
+    args=training_args,
+    train_dataset=train_dataset_hf,
+    eval_dataset=val_dataset_hf,
+    tokenizer=tokenizer,
+    compute_metrics=compute_metrics,
+    callbacks=callbacks,
+)
+
+trainer.train()
+trainer.save_model(output_dir)
+
+# # -----------------------------
+# # Example Inference
+# # -----------------------------
+# test_sentences = [
+#     "The cat sat on the mat.",
+#     "Running down the street"
+# ]
+# test_inputs = tokenizer(
+#     test_sentences, 
+#     return_tensors="pt", 
+#     truncation=True, 
+#     padding="max_length", 
+#     max_length=128
+# )
+
+# model.eval()
+# with torch.no_grad():
+#     outputs = model(**test_inputs)
+#     preds = torch.argmax(outputs.logits, dim=1).tolist()
+
+# print("Predictions:", preds)  # 1 for complete, 0 for incomplete
+
+# -----------------------------
+# To view TensorBoard logs:
+# tensorboard --logdir=./tensorboard_logs
+# -----------------------------
+
+```
+
 ## Contributing 🤝
 
 Got ideas or found a bug? Contributions are welcome! Feel free to open issues or submit pull requests.
