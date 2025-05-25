@@ -108,6 +108,7 @@ class AudioProcessor:
                 specific_model="Lasinya",
                 local_models_path="./models",
                 voice="reference_audio.wav",
+                language="zh",
                 speed=1.1,
                 use_deepspeed=True,
                 thread_count=6,
