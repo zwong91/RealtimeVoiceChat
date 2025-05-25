@@ -96,6 +96,8 @@ uv pip install -r requirements.txt
 # Install ollama https://github.com/ollama/ollama/releases
 (curl -fsSL https://ollama.com/install.sh | sh && ollama serve > ollama.log 2>&1) &
 
+ollama run hf.co/bartowski/huihui-ai_Mistral-Small-24B-Instruct-2501-abliterated-GGUF:Q4_K_M
+
 ```
 
 Now, choose your adventure:
@@ -277,8 +279,6 @@ RealtimeSTT 和 RealtimeTTS 都无法处理并行请求，而这在多个用户�
 基于 faster_whisper，只能通过两种方式处理并行语音转文本：要么利用多个 GPU，要么批处理一个较大的音频输入文件,
 这两种选项都不支持对多个传入请求的真正并发转录。
 **推荐采用水平扩展的方法，使用多个实例，每个实例在一个独立的 GPU 上。**
-
-ollama run hf.co/bartowski/huihui-ai_Mistral-Small-24B-Instruct-2501-abliterated-GGUF:Q4_K_M
 
 24GB 显存（RTX 3090/4090) 运行当前模型的首次令牌时间TTFT 为 0.0563 秒，推理速度为 52.85 token/秒。
 16GB 的话则 首次令牌时间低于 100 毫秒，速度超过 30 个令牌每秒。Holy fuck LLM: 139.02ms, TTS: 59.90ms

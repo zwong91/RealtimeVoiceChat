@@ -281,8 +281,7 @@ class TurnDetection:
             )
             outputs = self.session.run(None, {"input_ids": inputs["input_ids"].astype("int64")}) # Run one prediction
             eou_probability = outputs[0].flatten()[-1]
-            logger.info(f"End of turn probability: {float(eou_probability):.4f})
-
+            logger.info(f"End of turn probability: {float(eou_probability):.4f}")
         logger.info("🎤✅ Classification model warmed up.")
 
         # Default dynamic pause settings (initialized for speed_factor=0.0)
