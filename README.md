@@ -261,11 +261,11 @@ ollama run hf.co/bartowski/huihui-ai_Mistral-Small-24B-Instruct-2501-abliterated
 pip install "ctranslate2<4.5.0"
 
 * VAD: Webrtcvad (first fast check) followed by SileroVAD (high compute verification)
-* Transcription: large-v3-turbo whisper (CTranslate2)
+* Transcription: large-v3-turbo whisper (CTranslate2) 300ms
 * Turn Detection: KoljaB/SentenceFinishedClassification (selftrained BERT-model)
-sentence binary classification model
-* LLM: hf.co/bartowski/huihui-ai_Mistral-Small-24B-Instruct-2501-abliterated-GGUF:Q4_K_M (easily switchable)
-* TTS: Coqui XTTSv2, switchable to Kokoro or Orpheus (this one is slower)
+sentence binary classification model  20-50ms
+* LLM: hf.co/bartowski/huihui-ai_Mistral-Small-24B-Instruct-2501-abliterated-GGUF:Q4_K_M (easily switchable) 140ms
+* TTS: Coqui XTTSv2, switchable to Kokoro or Orpheus (this one is slower) 80ms
 
 https://medium.com/@lonligrin/improving-voice-ai-with-a-sentence-completeness-classifier-2da6e950538a
 基于 Silero-VAD 的转弯检测仅在用户停止说话后使用固定的沉默时间，然后决定“转弯结束”。这非常幼稚。
