@@ -25,8 +25,8 @@ START_STT_SERVER = False # Set to True to use the client/server version of Realt
 DEFAULT_RECORDER_CONFIG: Dict[str, Any] = {
     "use_microphone": False,
     "spinner": False,
-    "model": "base.en",
-    "realtime_model_type": "base.en",
+    "model": "large-v3-turbo",
+    "realtime_model_type": "large-v3-turbo",
     "use_main_model_for_realtime": False,
     "language": "en", # Default, will be overridden by source_language in __init__
     "silero_sensitivity": 0.05,

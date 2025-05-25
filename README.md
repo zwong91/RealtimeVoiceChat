@@ -220,7 +220,7 @@ Want to tweak the AI's voice, brain, or how it listens? Modify the Python files 
     *   Set `LLM_START_PROVIDER` (`"ollama"` or `"openai"`) and `LLM_START_MODEL` (e.g., `"hf.co/..."` for Ollama, model name for OpenAI) in `server.py`. Remember to pull the Ollama model if using Docker (see Installation Step A3).
     *   Customize the AI's personality by editing `system_prompt.txt`.
 *   **STT Settings (`transcribe.py`):**
-    *   Modify `DEFAULT_RECORDER_CONFIG` to change the Whisper model (`model`), language (`language`), silence thresholds (`silence_limit_seconds`), etc. The default `base.en` model is pre-downloaded during the Docker build.
+    *   Modify `DEFAULT_RECORDER_CONFIG` to change the Whisper model (`model`), language (`language`), silence thresholds (`silence_limit_seconds`), etc. The default `large-v3-turbo` model is pre-downloaded during the Docker build.
 *   **Turn Detection Sensitivity (`turndetect.py`):**
     *   Adjust pause duration constants within the `TurnDetector.update_settings` method.
 *   **SSL/HTTPS (`server.py`):**
@@ -246,20 +246,26 @@ Want to tweak the AI's voice, brain, or how it listens? Modify the Python files 
 
 进行垂直扩展则在每个新的 websocket 连接上初始化 AudioInputProcessor 以及其他类，
 RealtimeSTT 和 RealtimeTTS 都无法处理并行请求，而这在多个用户场景中是必需的。
-延迟下降将非常明显，整体性能将大大受损。即使只有一个用户，RealtimeVoiceChat 也确实需要一块相当强大的 GPU 才能顺畅运行。
+延迟下降将非常明显，整体性能将大大受损。即使只有一个用户，RealtimeVoiceChat 也确实需要一块相当强大的 GPU 才能顺畅运行。实时转录的垂直扩展涉及的内容非常复杂，首先，你面临的问题是来自不同客户端的音频块需要进行语音活动检测（VAD）。即使你设法通过批处理完美地并行化转录，你仍然会在 SileroVAD 或 webrtcVAD 上遇到瓶颈，，因为这两者都不支持批处理。两者都会引入延迟。因此，假设 10 个音频块并行到达，你处理 10 倍的 SileroVAD，增加的延迟将使实时处理变得不可能。
+此外，批处理可能同时处理多个请求，但客户端的转录请求并不是完美同步到达的。你必须手动延迟它们，等待在特定时间窗口内到达足够的请求以形成一个批次。仅这一点就增加了延迟，破坏了客户的实时体验。
+基于 faster_whisper，只能通过两种方式处理并行语音转文本：要么利用多个 GPU，要么批处理一个较大的音频输入文件,
+这两种选项都不支持对多个传入请求的真正并发转录。
+**推荐采用水平扩展的方法，使用多个实例，每个实例在一个独立的 GPU 上。**
 
 ollama run hf.co/bartowski/huihui-ai_Mistral-Small-24B-Instruct-2501-abliterated-GGUF:Q4_K_M
 
 24GB 显存（RTX 3090/4090) 运行当前模型的首次令牌时间TTFT 为 0.0563 秒，推理速度为 52.85 token/秒。
 16GB 的话则 首次令牌时间低于 100 毫秒，速度超过 30 个令牌每秒。Holy fuck LLM: 139.02ms, TTS: 59.90ms
 
-
 "Unable to load any of {libcudnn_ops.so.9.1.0, libcudnn_ops.so.9.1, libcudnn_ops.so.9, libcudnn_ops.so}" error
 pip install "ctranslate2<4.5.0"
 
-
-turn detection KoljaB/SentenceFinishedClassification
+* VAD: Webrtcvad (first fast check) followed by SileroVAD (high compute verification)
+* Transcription: large-v3-turbo whisper (CTranslate2)
+* Turn Detection: KoljaB/SentenceFinishedClassification (selftrained BERT-model)
 sentence binary classification model
+* LLM: hf.co/bartowski/huihui-ai_Mistral-Small-24B-Instruct-2501-abliterated-GGUF:Q4_K_M (easily switchable)
+* TTS: Coqui XTTSv2, switchable to Kokoro or Orpheus (this one is slower)
 
 https://medium.com/@lonligrin/improving-voice-ai-with-a-sentence-completeness-classifier-2da6e950538a
 基于 Silero-VAD 的转弯检测仅在用户停止说话后使用固定的沉默时间，然后决定“转弯结束”。这非常幼稚。
@@ -267,6 +273,31 @@ https://medium.com/@lonligrin/improving-voice-ai-with-a-sentence-completeness-cl
 这远非完美，但相较于使用单纯的沉默来说是一个实质性的改进。
 
 MPV 流 而不是 PCM
+无法加载任何 {libcudnn_ops.so.9.1.0, libcudnn_ops.so.9.1, libcudnn_ops.so.9, libcudnn_ops.so}：
+
+```bash
+pip install transformers==4.47.0
+#安装 cuBLAS 和 cuDNN
+apt install -y cuda-toolkit-12-4
+https://developer.nvidia.com/cudnn-downloads
+```
+
+色情电话服务
+
+https://github.com/KoljaB/RealtimeVoiceChat/blob/main/code/audio_module.py#L108
+
+应用容器中创建一个子文件夹：./models/some_folder_name
+ 将您所需的语音文件复制到该文件夹中：config.json、model.pth、vocab.json 和
+speakers_xtts.pth（您可以从 Lasinya 复制 speakers_xtts.pth，它对每个语音都是相同的。然后将 audio_module.py 中的 specific_model="Lasinya" 行更改为 specific_model="some_folder_name"。
+
+Lasinya voice 是我使用自创的合成数据集制作的 XTTS 2.0.2 微调版本。我使用了 https://github.com/daswer123/xtts-finetune-webui 进行训练。
+
+https://huggingface.co/sandy1990418/xtts-v2-chinese
+
+https://github.com/idiap/coqui-ai-TTS/blob/dev/TTS/demos/xtts_ft_demo/XTTS_finetune_colab.ipynb
+
+質量和速度的最佳平衡。
+
 ```python
 import os
 import random
