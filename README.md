@@ -215,8 +215,8 @@ Your application is already running via `docker compose up -d`! Check logs using
 
 1.  **Activate your virtual environment** (if not already active):
     ```bash
-    # Linux/macOS: source ../venv/bin/activate
-    # Windows: ..\venv\Scripts\activate
+    # Linux/macOS: source ./agent/bin/activate
+    # Windows: .\agent\Scripts\activate
     ```
 2.  **Navigate to the `src` directory** (if not already there):
     ```bash
@@ -302,7 +302,6 @@ MPV 流 而不是 PCM
 无法加载任何 {libcudnn_ops.so.9.1.0, libcudnn_ops.so.9.1, libcudnn_ops.so.9, libcudnn_ops.so}：
 
 ```bash
-pip install transformers==4.47.0
 #安装 cuBLAS 和 cuDNN
 apt install -y cuda-toolkit-12-4
 https://developer.nvidia.com/cudnn-downloads

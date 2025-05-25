@@ -12,8 +12,8 @@ echo Starting installation process...
 
 :: Create and activate virtual environment
 echo Creating and activating virtual environment...
-%PYTHON_EXE% -m venv venv
-call venv\Scripts\activate.bat
+%PYTHON_EXE% -m venv agent
+call agent\Scripts\activate.bat
 
 :: Upgrade pip
 echo Upgrading pip...

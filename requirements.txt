@@ -18,3 +18,5 @@ deepspeed
 
 # ngrok proxy
 ngrok>=1.0.0
+
+transformers==4.47.0

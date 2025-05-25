@@ -1,4 +1,3 @@
-# Remove the version: '3.8' line as per the warning
 services:
   # Your FastAPI Application Service
   app:

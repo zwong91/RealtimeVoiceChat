@@ -117,7 +117,7 @@ class AudioProcessor:
                 load_balancing=True,
                 load_balancing_buffer_length=0.5,
                 load_balancing_cut_off=0.1,
-                add_sentence_filter=True,
+                add_sentence_filter=False,
             )
         elif engine == "kokoro":
             self.engine = KokoroEngine(
@@ -147,7 +147,7 @@ class AudioProcessor:
         # Initialize the RealtimeTTS stream
         self.stream = TextToAudioStream(
             self.engine,
-            # tokenizer="stanza",
+            tokenizer="stanza",
             language="zh",
             muted=True, # Do not play audio directly
             playout_chunk_size=4096, # Internal chunk size for processing

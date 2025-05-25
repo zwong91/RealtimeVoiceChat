@@ -1,3 +1,3 @@
 @echo off
-call venv\Scripts\activate.bat
+call agent\Scripts\activate.bat
 cmd
