@@ -94,7 +94,7 @@ class TranscriptionProcessor:
 
     def __init__(
             self,
-            source_language: str = "en",
+            source_language: str = "zh",
             realtime_transcription_callback: Optional[Callable[[str], None]] = None,
             full_transcription_callback: Optional[Callable[[str], None]] = None,
             potential_full_transcription_callback: Optional[Callable[[str], None]] = None,

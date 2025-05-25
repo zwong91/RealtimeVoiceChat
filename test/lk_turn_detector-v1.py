@@ -18,7 +18,7 @@ MAX_HISTORY_TURNS = 6
 MAX_HISTORY_TOKENS = 128
 MIN_LANGUAGE_DETECTION_LENGTH = 5
 
-UNLIKELY_THRESHOLD = 0.1
+UNLIKELY_THRESHOLD = 0.15
 
 chat_example1 = [
     {"role": "user", "content": "今天天气怎么样？"},

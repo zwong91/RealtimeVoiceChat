@@ -137,11 +137,33 @@ RUN echo "Preloading faster_whisper model: ${WHISPER_MODEL}" && \
 # <<<--- SentenceFinishedClassification Pre-download --->>>
 RUN echo "Preloading SentenceFinishedClassification model..." && \
     # Note: Downloads happen as root
-    python3 -c "from transformers import DistilBertTokenizerFast, DistilBertForSequenceClassification; \
+    python3 -c "from transformers import AutoTokenizer; \
+                from huggingface_hub import hf_hub_download; \
+                HG_MODEL = 'livekit/turn-detector'; \
+                MODEL_REVISION = 'v0.2.0-intl'; \
+                ONNX_FILENAME = 'model_q8.onnx'; \
                 print('Downloading tokenizer...'); \
-                tokenizer = DistilBertTokenizerFast.from_pretrained('KoljaB/SentenceFinishedClassification'); \
-                print('Downloading classification model...'); \
-                model = DistilBertForSequenceClassification.from_pretrained('KoljaB/SentenceFinishedClassification'); \
+                tokenizer = AutoTokenizer.from_pretrained( \
+                    HG_MODEL, \
+                    revision=MODEL_REVISION, \
+                    local_files_only=False, \
+                    truncation_side='left' \
+                ); \
+                print('Downloading ONNX classification model...'); \
+                local_path = hf_hub_download( \
+                    repo_id=HG_MODEL, \
+                    filename=ONNX_FILENAME, \
+                    subfolder='onnx', \
+                    revision=MODEL_REVISION, \
+                    local_files_only=False \
+                ); \
+                print('Downloading languages.json config...'); \
+                config_fname = hf_hub_download( \
+                    repo_id=HG_MODEL, \
+                    filename='languages.json', \
+                    revision=MODEL_REVISION, \
+                    local_files_only=False \
+                ); \
                 print('Model downloads successful.')" \
     || (echo "Sentence Classifier download failed" && exit 1)
 

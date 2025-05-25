@@ -1,7 +1,9 @@
 import logging
 logger = logging.getLogger(__name__)
 
-import transformers
+from transformers import AutoTokenizer
+from huggingface_hub import hf_hub_download
+import onnxruntime as ort
 import collections
 import threading
 import queue
@@ -10,9 +12,10 @@ import time
 import re
 
 # Configuration constants
-model_dir_local = "KoljaB/SentenceFinishedClassification"
-model_dir_cloud = "/root/models/sentenceclassification/"
-sentence_end_marks = ['.', '!', '?', '。'] # Characters considered sentence endings
+model_dir = "livekit/turn-detector"
+onnx_filename = "model_q8.onnx"
+model_revision = "v0.2.0-intl"
+sentence_end_marks = ['.', '!', '?', '。', '！', '？', '…', '~', '～'] # Characters considered sentence endings
 
 # Anchor points for probability-to-pause interpolation
 anchor_points = [
@@ -197,7 +200,6 @@ class TurnDetection:
             pipeline_latency: Estimated base latency of the STT/processing pipeline in seconds.
             pipeline_latency_overhead: Additional buffer added to the pipeline latency.
         """
-        model_dir = model_dir_local if local else model_dir_cloud
 
         self.on_new_waiting_time = on_new_waiting_time
 
@@ -215,10 +217,38 @@ class TurnDetection:
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         logger.info(f"🎤🔌 Using device: {self.device}")
-        self.tokenizer = transformers.DistilBertTokenizerFast.from_pretrained(model_dir)
-        self.classification_model = transformers.DistilBertForSequenceClassification.from_pretrained(model_dir)
-        self.classification_model.to(self.device)
-        self.classification_model.eval() # Set model to evaluation mode
+
+        # Download or load model
+        local_path = hf_hub_download(
+            repo_id=model_dir,
+            filename=onnx_filename,
+            subfolder="onnx",
+            revision=model_revision,
+            local_files_only=False,
+        )
+
+        config_fname = hf_hub_download(
+            repo_id=model_dir,
+            filename="languages.json",
+            revision=model_revision,
+            local_files_only=False,
+        )
+        with open(config_fname) as f:
+            self.languages = json.load(f)
+
+        self._unlikely_threshold = 0.15
+        self._last_language = None
+
+        # Initialize session and tokenizer
+        self.session = ort.InferenceSession(local_path, providers=["CPUExecutionProvider"])
+
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            model_dir,
+            revision=model_revision,
+            local_files_only=False,
+            truncation_side="left",
+        )
+        logger.info(f"Loaded LKTurn model from {local_path}")
         self.max_length: int = 128 # Max sequence length for the model
         self.pipeline_latency: float = pipeline_latency
         self.pipeline_latency_overhead: float = pipeline_latency_overhead
@@ -229,17 +259,30 @@ class TurnDetection:
 
         # Warmup the classification model for faster initial predictions
         logger.info("🎤🔥 Warming up the classification model...")
+        chat_ctx = [
+            {"role": "user", "content": "今天天气怎么样？"},
+            {"role": "assistant", "content": "今天阳光明媚，温度适中。"},
+            {"role": "user", "content": "我很喜欢这样的天气, 出去玩咯。"},
+        ]
+        # chat_ctx = [
+        #     {"role": "user", "content": "What's the weather like today?"},
+        #     {"role": "assistant", "content": "It's sunny and warm."},
+        #     {"role": "user", "content": "I like the weather"},
+        #     {"role": "user", "content": "I'm not sure what to do. but i want play."}
+        # ]
+        warmup_text = self.format_chat_ctx(chat_ctx)
         with torch.no_grad():
-            warmup_text = "This is a warmup sentence."
             inputs = self.tokenizer(
                 warmup_text,
-                return_tensors="pt",
+                add_special_tokens=False,
+                return_tensors="np",
+                max_length=self.max_length,
                 truncation=True,
-                padding="max_length",
-                max_length=self.max_length
             )
-            inputs = {key: value.to(self.device) for key, value in inputs.items()}
-            _ = self.classification_model(**inputs) # Run one prediction
+            outputs = self.session.run(None, {"input_ids": inputs["input_ids"].astype("int64")}) # Run one prediction
+            eou_probability = outputs[0].flatten()[-1]
+            logger.info(f"End of turn probability: {float(eou_probability):.4f})
+
         logger.info("🎤✅ Classification model warmed up.")
 
         # Default dynamic pause settings (initialized for speed_factor=0.0)
@@ -251,6 +294,29 @@ class TurnDetection:
         self.unknown_sentence_detection_pause: float = 1.25
         # Apply initial settings (can be called again later)
         self.update_settings(speed_factor=0.0)
+
+    def format_chat_ctx(self, chat_ctx):
+        """Format the chat context for model input."""
+        new_chat_ctx = []
+        for msg in chat_ctx:
+            content = msg["content"]
+            if not content:
+                continue
+
+            msg["content"] = content
+            new_chat_ctx.append(msg)
+
+        convo_text = self.tokenizer.apply_chat_template(
+            new_chat_ctx,
+            add_generation_prompt=False,
+            add_special_tokens=False,
+            tokenize=False,
+        )
+
+        # remove the EOU token from current utterance
+        ix = convo_text.rfind("<|im_end|>")
+        text = convo_text[:ix]
+        return text
 
     def update_settings(self, speed_factor: float) -> None:
         """
@@ -342,27 +408,20 @@ class TurnDetection:
             return self._completion_probability_cache[sentence]
 
         # If not in cache, run model prediction
-        import torch
-        import torch.nn.functional as F
-
+        chat_ctx = [
+            {"role": "user", "content": sentence},
+        ]
+        formatted_text = self.format_chat_ctx(chat_ctx)
         inputs = self.tokenizer(
-            sentence,
-            return_tensors="pt",
+            formatted_text,
+            add_special_tokens=False,
+            return_tensors="np",
+            max_length=self.max_length,
             truncation=True,
-            padding="max_length",
-            max_length=self.max_length
         )
-        # Move input tensors to the correct device (CPU or GPU)
-        inputs = {key: value.to(self.device) for key, value in inputs.items()}
 
-        with torch.no_grad(): # Disable gradient calculation for inference
-            outputs = self.classification_model(**inputs)
-
-        logits = outputs.logits
-        # Apply softmax to get probabilities [prob_incomplete, prob_complete]
-        probabilities = F.softmax(logits, dim=1).squeeze().tolist()
-        prob_complete = probabilities[1] # Index 1 corresponds to 'complete' label
-
+        outputs = self.session.run(None, {"input_ids": inputs["input_ids"].astype("int64")})
+        prob_complete = outputs[0].flatten()[-1]
         # Store the result in the cache
         self._completion_probability_cache[sentence] = prob_complete
         self._completion_probability_cache.move_to_end(sentence) # Mark as recently used
