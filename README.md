@@ -335,6 +335,14 @@ apt install -y cuda-toolkit-12-4
 https://developer.nvidia.com/cudnn-downloads
 ```
 
+Could not load library libcudnn_ops_infer.so.8. Error: libcudnn_ops_infer.so.8: cannot open shared object file: No such file or directory
+18:18.74 root       ERRO conn.recv() error:  occurred in the synthesize worker thread of Coqui engine.
+
+```bash
+apt install libcudnn8 libcudnn8-dev
+```
+
+
 色情电话服务
 
 https://github.com/KoljaB/RealtimeVoiceChat/blob/main/code/audio_module.py#L108
