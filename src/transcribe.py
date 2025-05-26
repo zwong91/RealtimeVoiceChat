@@ -437,9 +437,8 @@ class TranscriptionProcessor:
             The normalized string.
         """
         text = text.lower()
-        # Remove all non-alphanumeric characters (keeping spaces)
-        text = re.sub(r'[^a-z0-9\s]', '', text) # Keep spaces for SequenceMatcher
-        # Remove extra whitespace and trim
+        # 保留中英文、数字和空格
+        text = re.sub(r'[^\u4e00-\u9fff\w\s]', '', text)  # \u4e00-\u9fff 是常用汉字区
         text = re.sub(r'\s+', ' ', text).strip()
         return text
 
@@ -494,7 +493,12 @@ class TranscriptionProcessor:
         if stripped_text_raw.endswith("...") and not force_ellipses:
             return
 
-        end_punctuations = [".", "!", "?"]
+        end_punctuations = [
+            ".", "!", "?",       # 英文
+            "。", "！", "？",     # 中文
+            "…", "——", "...",    # 拓展符号
+        ]
+
         now = time.time()
 
         # Only proceed if text ends with a standard punctuation mark or if forced

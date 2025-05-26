@@ -424,16 +424,17 @@ class TurnDetection:
         )
 
         outputs = self.session.run(None, {"input_ids": inputs["input_ids"].astype("int64")})
-        prob_complete = outputs[0].flatten()[-1]
+        eou_probability = outputs[0].flatten()[-1]
+        logger.info(f"End of turn probability: {float(eou_probability):.4f}")
         # Store the result in the cache
-        self._completion_probability_cache[sentence] = prob_complete
+        self._completion_probability_cache[sentence] = eou_probability
         self._completion_probability_cache.move_to_end(sentence) # Mark as recently used
 
         # Maintain cache size (LRU eviction)
         if len(self._completion_probability_cache) > self._completion_probability_cache_max_size:
             self._completion_probability_cache.popitem(last=False) # Remove the least recently used item
 
-        return prob_complete
+        return eou_probability
 
     def get_suggested_whisper_pause(self, text: str) -> float:
         """
@@ -524,17 +525,17 @@ class TurnDetection:
 
             whisper_suggested_pause = avg_pause # Use the averaged pause
 
-            # Prepare text for the sentence completion model (remove all punctuation)
-            import string
-            transtext = processed_text.translate(str.maketrans('', '', string.punctuation))
-            # Further clean potentially remaining non-alphanumeric chars at the end
-            cleaned_for_model = re.sub(r'[^a-zA-Z\s]+$', '', transtext).rstrip() # Also remove trailing spaces
+            # # Prepare text for the sentence completion model (remove all punctuation)
+            # import string
+            # transtext = processed_text.translate(str.maketrans('', '', string.punctuation))
+            # # Further clean potentially remaining non-alphanumeric chars at the end
+            # cleaned_for_model = re.sub(r'[^a-zA-Z\s]+$', '', transtext).rstrip() # Also remove trailing spaces
 
             # Get sentence completion probability
-            prob_complete = self.get_completion_probability(cleaned_for_model)
+            eou_probability = self.get_completion_probability(processed_text)
 
             # Interpolate probability to a pause duration
-            sentence_finished_model_pause = interpolate_detection(prob_complete)
+            sentence_finished_model_pause = interpolate_detection(eou_probability)
 
             # Combine pauses: weighted average giving more importance to punctuation pause
             weight_towards_whisper = 0.65
@@ -548,7 +549,7 @@ class TurnDetection:
             if contains_ellipses:
                 final_pause += 0.2
 
-            logger.info(f"🎤📊 Calculated pauses: Punct={whisper_suggested_pause:.2f}, Model={sentence_finished_model_pause:.2f}, Weighted={weighted_pause:.2f}, Final={final_pause:.2f} for \"{processed_text}\" (Prob={prob_complete:.2f})")
+            logger.info(f"🎤📊 Calculated pauses: Punct={whisper_suggested_pause:.2f}, Model={sentence_finished_model_pause:.2f}, Weighted={weighted_pause:.2f}, Final={final_pause:.2f} for \"{processed_text}\" (Prob={eou_probability:.2f})")
 
 
             # Ensure final pause is not less than the pipeline latency overhead
