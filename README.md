@@ -265,7 +265,7 @@ Your application is already running via `docker compose up -d`! Check logs using
 
 ## Configuration Deep Dive 🔧
 
-Want to tweak the AI's voice, brain, or how it listens? Modify the Python files in the `code/` directory.
+Want to tweak the AI's voice, brain, or how it listens? Modify the Python files in the `src/` directory.
 
 **⚠️ Important Docker Note:** If using Docker, make any configuration changes *before* running `docker compose build` to ensure they are included in the image.
 

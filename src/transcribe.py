@@ -28,7 +28,7 @@ DEFAULT_RECORDER_CONFIG: Dict[str, Any] = {
     "model": "base",
     "realtime_model_type": "base",
     "use_main_model_for_realtime": False,
-    "language": "zh", # Default, will be overridden by source_language in __init__
+    "language": "", # Default, will be overridden by source_language in __init__
     "silero_sensitivity": 0.05,
     "webrtc_sensitivity": 3,
     "post_speech_silence_duration": 0.7,
@@ -47,7 +47,7 @@ DEFAULT_RECORDER_CONFIG: Dict[str, Any] = {
     "allowed_latency_limit": 500,
     # Callbacks will be added dynamically in _create_recorder
     "debug_mode": True,
-    "initial_prompt_realtime": "The sky is blue. When the sky... She walked home. Because he... Today is sunny. If only I...",
+    "initial_prompt_realtime": "天是蓝的。当天空……她走路回家。因为他……今天天气晴朗。要是我……",
     "faster_whisper_vad_filter": False,
 }
 
@@ -94,7 +94,7 @@ class TranscriptionProcessor:
 
     def __init__(
             self,
-            source_language: str = "zh",
+            source_language: str = "",
             realtime_transcription_callback: Optional[Callable[[str], None]] = None,
             full_transcription_callback: Optional[Callable[[str], None]] = None,
             potential_full_transcription_callback: Optional[Callable[[str], None]] = None,

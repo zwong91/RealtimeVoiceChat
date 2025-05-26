@@ -22,7 +22,7 @@ class AudioInputProcessor:
 
     def __init__(
             self,
-            language: str = "zh",
+            language: str = "",
             is_orpheus: bool = False,
             silence_active_callback: Optional[Callable[[bool], None]] = None,
             pipeline_latency: float = 0.5,
