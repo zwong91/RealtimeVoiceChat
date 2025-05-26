@@ -993,9 +993,9 @@ class LLM:
             return None
 
         # --- Define specific prompts for measurement ---
-        measurement_system_prompt = "You are a precise assistant. Follow instructions exactly."
+        measurement_system_prompt = "你是一个严谨的助手。请严格按照指示执行。"
         # This text is designed to likely produce > 10 tokens across different tokenizers.
-        measurement_user_prompt = "Repeat the following sequence exactly, word for word: one two three four five six seven eight nine ten eleven twelve"
+        measurement_user_prompt = "逐字逐词重复以下序列：一 二 三 四 五 六 七 八 九 十 十一 十二"
         measurement_history = [
             {"role": "system", "content": measurement_system_prompt},
             {"role": "user", "content": measurement_user_prompt}
