@@ -248,7 +248,7 @@ Want to tweak the AI's voice, brain, or how it listens? Modify the Python files 
     *   Set `LLM_START_PROVIDER` (`"ollama"` or `"openai"`) and `LLM_START_MODEL` (e.g., `"hf.co/..."` for Ollama, model name for OpenAI) in `server.py`. Remember to pull the Ollama model if using Docker (see Installation Step A3).
     *   Customize the AI's personality by editing `system_prompt.txt`.
 *   **STT Settings (`transcribe.py`):**
-    *   Modify `DEFAULT_RECORDER_CONFIG` to change the Whisper model (`model`), language (`language`), silence thresholds (`silence_limit_seconds`), etc. The default `large-v3-turbo` model is pre-downloaded during the Docker build.
+    *   Modify `DEFAULT_RECORDER_CONFIG` to change the Whisper model (`model`), language (`language`), silence thresholds (`silence_limit_seconds`), etc. The default `deepdml/faster-whisper-large-v3-turbo-ct2` model is pre-downloaded during the Docker build.
 *   **Turn Detection Sensitivity (`turndetect.py`):**
     *   Adjust pause duration constants within the `TurnDetector.update_settings` method.
 *   **SSL/HTTPS (`server.py`):**
@@ -287,7 +287,7 @@ RealtimeSTT 和 RealtimeTTS 都无法处理并行请求，而这在多个用户�
 pip install "ctranslate2<4.5.0"
 
 * VAD: Webrtcvad (first fast check) followed by SileroVAD (high compute verification)
-* Transcription: large-v3-turbo whisper (CTranslate2) 300ms
+* Transcription: deepdml/faster-whisper-large-v3-turbo-ct2 whisper (CTranslate2) 300ms
 * Turn Detection: livekit/turn-detector (qwen2.5:0.5b base model)
 sentence binary classification model  20-50ms
 * LLM: hf.co/bartowski/huihui-ai_Mistral-Small-24B-Instruct-2501-abliterated-GGUF:Q4_K_M (easily switchable) 140ms

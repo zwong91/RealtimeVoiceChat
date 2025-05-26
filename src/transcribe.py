@@ -25,8 +25,8 @@ START_STT_SERVER = False # Set to True to use the client/server version of Realt
 DEFAULT_RECORDER_CONFIG: Dict[str, Any] = {
     "use_microphone": False,
     "spinner": False,
-    "model": "large-v3-turbo",
-    "realtime_model_type": "large-v3-turbo",
+    "model": "deepdml/faster-whisper-large-v3-turbo-ct2",
+    "realtime_model_type": "deepdml/faster-whisper-large-v3-turbo-ct2",
     "use_main_model_for_realtime": False,
     "language": "zh", # Default, will be overridden by source_language in __init__
     "silero_sensitivity": 0.05,
