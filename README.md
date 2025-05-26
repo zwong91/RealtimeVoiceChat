@@ -68,6 +68,9 @@ This project leverages powerful AI models, which have some requirements:
 **Clone the repository first:**
 
 ```bash
+# runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04
+#On-Demand - Secure Cloud
+
 git clone https://github.com/zwong91/RealtimeVoiceChat.git
 cd RealtimeVoiceChat
 
@@ -97,6 +100,15 @@ uv pip install -r requirements.txt
 (curl -fsSL https://ollama.com/install.sh | sh && ollama serve > ollama.log 2>&1) &
 
 ollama run hf.co/bartowski/huihui-ai_Mistral-Small-24B-Instruct-2501-abliterated-GGUF:Q4_K_M
+
+
+#安装 cuBLAS 和 cuDNN
+apt install -y cuda-toolkit-12-4
+
+wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
+dpkg -i cuda-keyring_1.1-1_all.deb
+apt-get update
+apt-get -y install cudnn
 
 ```
 
