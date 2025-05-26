@@ -147,7 +147,7 @@ class AudioProcessor:
         # Initialize the RealtimeTTS stream
         self.stream = TextToAudioStream(
             self.engine,
-            tokenizer="stanza",
+            #tokenizer="stanza",
             language="zh",
             muted=True, # Do not play audio directly
             playout_chunk_size=4096, # Internal chunk size for processing
@@ -205,6 +205,12 @@ class AudioProcessor:
             sentence_silence_duration=self.silence.sentence,
             default_silence_duration=self.silence.default,
             force_first_fragment_after_words=999999,
+            
+            minimum_sentence_length=2,
+            minimum_first_fragment_length=2,
+            tokenizer="stanza",
+            language="zh",
+            context_size=2,
         )
         self.stream.play_async(**play_kwargs_ttfa)
 
