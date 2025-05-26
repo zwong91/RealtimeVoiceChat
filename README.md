@@ -101,8 +101,15 @@ uv pip install -r requirements.txt
 
 ollama run hf.co/bartowski/huihui-ai_Mistral-Small-24B-Instruct-2501-abliterated-GGUF:Q4_K_M
 
+## zh-hans
+huggingface-cli download stanfordnlp/stanza-zh-hans
 
-#安装 cuBLAS 和 cuDNN
+```python
+import stanza
+stanza.download(lang="zh-hans", processors={"pos": "gsdsimp_charlm"})
+```
+
+## 安装 cuBLAS 和 cuDNN
 apt install -y cuda-toolkit-12-4
 
 wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb

@@ -943,9 +943,6 @@ async def websocket_endpoint(ws: WebSocket):
 # --------------------------------------------------------------------
 if __name__ == "__main__":
 
-    import stanza
-    stanza.download(lang="zh-hans", processors={"pos": "gsdsimp_charlm"})
-
     # Open Ngrok tunnel
     listener = ngrok.forward(f"http://localhost:8000", authtoken=os.getenv("NGROK_AUTHTOKEN", "2q0o5XSi73aG9m4KyMxHB0pmEXi_2mUYW4R1wDsanPzWgCWrW"))
     logger.debug(f"Ingress Ngrok tunnel opened at {listener.url()} for port 8000")
