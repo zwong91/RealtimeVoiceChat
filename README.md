@@ -99,12 +99,20 @@ uv pip install -r requirements.txt
 # Install ollama https://github.com/ollama/ollama/releases
 (curl -fsSL https://ollama.com/install.sh | sh && ollama serve > ollama.log 2>&1) &
 
-ollama run hf.co/bartowski/huihui-ai_Mistral-Small-24B-Instruct-2501-abliterated-GGUF:Q4_K_M
+ollama pull hf.co/bartowski/huihui-ai_Mistral-Small-24B-Instruct-2501-abliterated-GGUF:Q4_K_M
 
 ## zh-hans
+mkdir -p /root/stanza_resources/zh-hans/
 
-huggingface-cli download stanfordnlp/stanza-zh-hans
+pip install -U "huggingface_hub[cli]"
+huggingface-cli download stanfordnlp/stanza-zh-hans --local-dir stanza-zh-hans
+
+mv stanza-zh-hans/models/*  /root/stanza_resources/zh-hans/
+
 huggingface-cli login <hf_token> 
+
+git lfs install
+git clone https://huggingface.co/stanfordnlp/stanza-zh-hans
 ```python
 import stanza
 stanza.download(lang="zh-hans", processors={"pos": "gsdsimp_charlm"})
