@@ -102,8 +102,9 @@ uv pip install -r requirements.txt
 ollama run hf.co/bartowski/huihui-ai_Mistral-Small-24B-Instruct-2501-abliterated-GGUF:Q4_K_M
 
 ## zh-hans
-huggingface-cli download stanfordnlp/stanza-zh-hans
 
+huggingface-cli download stanfordnlp/stanza-zh-hans
+huggingface-cli login <hf_token> 
 ```python
 import stanza
 stanza.download(lang="zh-hans", processors={"pos": "gsdsimp_charlm"})
