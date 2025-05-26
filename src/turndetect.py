@@ -407,6 +407,9 @@ class TurnDetection:
             self._completion_probability_cache.move_to_end(sentence) # Mark as recently used
             return self._completion_probability_cache[sentence]
 
+        if not sentence or sentence.strip() == "":
+            return 0.0  # early exit for invalid input
+
         # If not in cache, run model prediction
         chat_ctx = [
             {"role": "user", "content": sentence},
