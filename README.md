@@ -101,25 +101,25 @@ uv pip install -r requirements.txt
 
 ollama pull hf.co/bartowski/huihui-ai_Mistral-Small-24B-Instruct-2501-abliterated-GGUF:Q4_K_M
 ollama pull qwen3:30b-a3b
-## zh-hans
-mkdir -p /root/stanza_resources/zh-hans/
+# ## zh-hans
+# mkdir -p /root/stanza_resources/zh-hans/
 
-pip install -U "huggingface_hub[cli]"
-huggingface-cli download stanfordnlp/stanza-zh-hans --local-dir stanza-zh-hans
+# pip install -U "huggingface_hub[cli]"
+# huggingface-cli download stanfordnlp/stanza-zh-hans --local-dir stanza-zh-hans
 
-mv stanza-zh-hans/models/*  /root/stanza_resources/zh-hans/
+# mv stanza-zh-hans/models/*  /root/stanza_resources/zh-hans/
 
-huggingface-cli login <hf_token> 
+# huggingface-cli login <hf_token> 
 
-git lfs install
-git clone https://huggingface.co/stanfordnlp/stanza-zh-hans
-# ```python
+# git lfs install
+# git clone https://huggingface.co/stanfordnlp/stanza-zh-hans
+# # ```python
 # import stanza
 # stanza.download(lang="zh-hans", processors={"pos": "gsdsimp_charlm"})
 # ```
 
 ## 安装 cuBLAS 和 cuDNN
-apt install -y cuda-toolkit-12-4
+# apt install -y cuda-toolkit-12-4
 
 wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
 dpkg -i cuda-keyring_1.1-1_all.deb
