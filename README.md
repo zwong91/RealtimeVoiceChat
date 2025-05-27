@@ -113,10 +113,10 @@ huggingface-cli login <hf_token>
 
 git lfs install
 git clone https://huggingface.co/stanfordnlp/stanza-zh-hans
-```python
-import stanza
-stanza.download(lang="zh-hans", processors={"pos": "gsdsimp_charlm"})
-```
+# ```python
+# import stanza
+# stanza.download(lang="zh-hans", processors={"pos": "gsdsimp_charlm"})
+# ```
 
 ## 安装 cuBLAS 和 cuDNN
 apt install -y cuda-toolkit-12-4
@@ -125,6 +125,8 @@ wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/
 dpkg -i cuda-keyring_1.1-1_all.deb
 apt-get update
 apt-get -y install cudnn
+
+apt-get install libcudnn8 && apt-get install libcudnn8-dev
 
 ```
 
@@ -306,6 +308,29 @@ RealtimeSTT 和 RealtimeTTS 都无法处理并行请求，而这在多个用户�
 此外，批处理可能同时处理多个请求，但客户端的转录请求并不是完美同步到达的。你必须手动延迟它们，等待在特定时间窗口内到达足够的请求以形成一个批次。仅这一点就增加了延迟，破坏了客户的实时体验。
 基于 faster_whisper，只能通过两种方式处理并行语音转文本：要么利用多个 GPU，要么批处理一个较大的音频输入文件,
 这两种选项都不支持对多个传入请求的真正并发转录。
+
+TTS Concurrency 死锁、GPU 资源竞争和高延迟的问题。不能对多个并发请求使用相同的引擎，因为它们最终都会写入同一个音频队列。要处理真正的并发合成，你需要多个引擎实例。
+对于 CoquiTTS 和大多数其他本地引擎来说，这并没有太大意义。所有这些引擎都使用 100%的 GPU，如果你并行化请求，只会使它们变慢。
+不同的 TTS 模型：
+1. Token-by-Token Streaming Models
+像 Coqui XTTS 这样的模型可以逐个音频令牌地流式传输音频。这让你可以在需要时减慢合成速度。
+例如：如果你的实时因子低于 0.5，你可以通过将每个合成的速度减慢到略低于 1 来同时运行两个合成。
+这样，单个合成不会阻塞 GPU，你可以同时为两个用户提供服务，而不会大幅延迟第一个音频令牌。Coqui 在快速系统上可以达到 <0.2 的实时因子 -> 5 个用户并行。
+在 rtf 为 0.2 的情况下会启动 5 个并行合成，但这时 GPU 负载已满。第六个用户必须等到其他合成中的一个完成，可能需要几秒钟。
+在RTF <0.03生成速度还不错, 无论是在 4090、A40、A100 还是 H100 上推理没啥区别，
+实现低于 200 毫秒的首个音频包延迟，减少扩散步骤和缩短初始音频（比如 2-3 秒）将输入文本分成两部分（或更多）并逐个合成。
+第一个“,”或“.”等处切文本, 部分播放的同时，你可以获得足够的时间来合成其余部分
+
+
+2. Diffusion Models
+而扩散模型如 StyleTTS2（或 Kokoro）则能够非常快速地生成完整的合成，<100ms，在快速系统上为 50ms。因此，这种速度使它们适合实时应用，即使它们是顺序处理请求，因为每个请求都会完全阻塞 GPU。
+6 个传入请求, 以每个请求 50 毫秒的速度开始处理，第六个用户大约需要等待 250 毫秒。
+
+3. LLM-Based TTS Systems
+基于 LLM 推理的新兴 TTS 系统，比如 Orpheus，它可以在任何 LLM 提供商上运行。这些系统让你可以使用 vLLM 进行服务并发批量处理，
+在高负载环境中，这种方法可能非常有前景，你可以在没有显著延迟的情况下批量处理多个传入的 TTS 请求。
+
+
 **推荐采用水平扩展的方法，使用多个实例，每个实例在一个独立的 GPU 上。**
 
 24GB 显存（RTX 3090/4090) 运行当前模型的首次令牌时间TTFT 为 0.0563 秒，推理速度为 52.85 token/秒。
@@ -342,22 +367,23 @@ Could not load library libcudnn_ops_infer.so.8. Error: libcudnn_ops_infer.so.8: 
 apt install libcudnn8 libcudnn8-dev
 ```
 
-
-色情电话服务
-
-https://github.com/KoljaB/RealtimeVoiceChat/blob/main/code/audio_module.py#L108
+<https://github.com/KoljaB/RealtimeVoiceChat/blob/main/code/audio_module.py#L108>
 
 应用容器中创建一个子文件夹：./models/some_folder_name
- 将您所需的语音文件复制到该文件夹中：config.json、model.pth、vocab.json 和
-speakers_xtts.pth（您可以从 Lasinya 复制 speakers_xtts.pth，它对每个语音都是相同的。然后将 audio_module.py 中的 specific_model="Lasinya" 行更改为 specific_model="some_folder_name"。
+ 将您所需的语音模型文件复制到该文件夹中：config.json、model.pth、vocab.json 和
+speakers_xtts.pth（可以从 Lasinya 复制 speakers_xtts.pth，它对每个语音都是相同的。然后将 audio_module.py 中的 specific_model="Lasinya" 行更改为 specific_model="some_folder_name"。
 
-Lasinya voice 是我使用自创的合成数据集制作的 XTTS 2.0.2 微调版本。我使用了 https://github.com/daswer123/xtts-finetune-webui 进行训练。
+Lasinya voice 使用自创的合成数据集制作的 XTTS 2.0.2 微调版本。使用了 <https://github.com/daswer123/xtts-finetune-webui> 进行训练。
 
-https://huggingface.co/sandy1990418/xtts-v2-chinese
+dataset zh  keywords
+ivanzhu109/zh-taiwan
+JacobLinCool/jacob-common-voice-19-zh-TW-curated
 
-https://github.com/idiap/coqui-ai-TTS/blob/dev/TTS/demos/xtts_ft_demo/XTTS_finetune_colab.ipynb
 
-質量和速度的最佳平衡。
+<https://huggingface.co/sandy1990418/xtts-v2-chinese>
+<https://github.com/idiap/coqui-ai-TTS/blob/dev/TTS/demos/xtts_ft_demo/XTTS_finetune_colab.ipynb>
+
+turn model質量和速度的最佳平衡。
 
 ```python
 import os
