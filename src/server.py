@@ -39,7 +39,7 @@ LLM_START_MODEL = "qwen3:30b-a3b"
 #LLM_START_MODEL = "hf.co/bartowski/huihui-ai_Mistral-Small-24B-Instruct-2501-abliterated-GGUF:Q4_K_M"
 # LLM_START_PROVIDER = "lmstudio"
 # LLM_START_MODEL = "Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q3_K_L.gguf"
-NO_THINK = False
+NO_THINK = True
 DIRECT_STREAM = TTS_START_ENGINE=="orpheus"
 
 if __name__ == "__main__":
