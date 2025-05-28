@@ -46,7 +46,9 @@ let batchOffset = 0;
 function initBatch() {
   if (!batchBuffer) {
     batchBuffer = bufferPool.pop() || new ArrayBuffer(MESSAGE_BYTES);
+    // Pointer 指针或者读写视图 header = 时间戳和标志位
     batchView   = new DataView(batchBuffer);
+    // 数组式“指针”或“视图”, 也与buffer 关联. body = 实际的音频 PCM-16 数据，每 2 个字节解释为一个有符号 16 位整数
     batchInt16  = new Int16Array(batchBuffer, HEADER_BYTES);
     batchOffset = 0;
   }

@@ -141,7 +141,7 @@ class AudioInputProcessor:
         # Convert to float32 for resampling precision
         audio_float32 = raw_audio.astype(np.float32)
 
-        # Resample using float32 data
+        #FIXME: Resample using float32 data, Adjust sample rate, 例如24kHz 重采样到 16kHz
         resampled_float = resample_poly(audio_float32, 1, self._RESAMPLE_RATIO)
 
         # Convert back to int16, clipping to ensure validity

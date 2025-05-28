@@ -1,6 +1,7 @@
 import re
 from difflib import SequenceMatcher
 import logging
+import jieba
 
 logger = logging.getLogger(__name__)
 
@@ -85,16 +86,17 @@ class TextSimilarity:
              logger.warning(f"📏⚠️ Input is not a string: {type(text)}. Converting to empty string.")
              text = ""
         text = text.lower()
+        # 保留中英文、数字和空格
         text = self._punctuation_regex.sub('', text)
         text = self._whitespace_regex.sub(' ', text).strip()
         return text
 
     def _get_last_n_words_text(self, normalized_text: str) -> str:
         """
-        Extracts the last `n_words` from a normalized text string.
+        Extracts the last `n_words` from a normalized text string using jieba for tokenization.
 
-        Splits the text by spaces and joins the last `n_words` back together.
-        If the text has fewer than `n_words`, the entire text is returned.
+        Splits the text into words (using jieba), and joins the last `n_words` back together.
+        If the text has fewer words than `n_words`, the entire text is returned.
 
         Args:
             normalized_text: A text string already processed by `_normalize_text`.
@@ -103,7 +105,8 @@ class TextSimilarity:
             A string containing the last `n_words` of the input, joined by spaces.
             Returns an empty string if the input is empty.
         """
-        words = normalized_text.split()
+        # 使用jieba进行分词。对于英文，jieba会按照单词分割；对于中文，会进行词语分割。
+        words = list(jieba.cut(normalized_text))
         # Handles cases where text has fewer than n_words automatically
         last_words_segment = words[-self.n_words:]
         return ' '.join(last_words_segment)
@@ -257,3 +260,51 @@ if __name__ == "__main__":
     threshold_checker = TextSimilarity(similarity_threshold=0.90, focus='overall')
     print(f"'{text_long1}' vs '{text_long_diff_end}' similar? {threshold_checker.are_texts_similar(text_long1, text_long_diff_end)}")
     print(f"'{text_short1}' vs '{text_short2}' similar? {threshold_checker.are_texts_similar(text_short1, text_short2)}")
+
+    # --- 中文测试用例 ---
+    print("\n" + "="*40)
+    print("--- 中文相似度测试 ---")
+    print("="*40)
+
+    # 整体相似度测试
+    chinese_text1 = "你好，世界。这是一个测试句子。"
+    chinese_text2 = "你好，世界。这是一个测试语句。"
+    chinese_text3 = "你好，世界。这是另一个不同的句子。"
+    chinese_text4 = "天气真好，我们出去玩吧。"
+    chinese_text5 = "天气真好，我们出去玩！" # 标点符号不同
+    chinese_text6 = "这是一个关于人工智能的讨论。"
+    chinese_text7 = "这是关于人工智能的讨论。" # 少了“一个”
+
+    print("\n--- 中文相似度测试 (Overall Focus) ---")
+    sim_overall_cn = TextSimilarity(focus='overall')
+    print(f"'{chinese_text1}' vs '{chinese_text2}': {sim_overall_cn.calculate_similarity(chinese_text1, chinese_text2):.4f}") # 预期：很高，只有末尾词不同
+    print(f"'{chinese_text1}' vs '{chinese_text3}': {sim_overall_cn.calculate_similarity(chinese_text1, chinese_text3):.4f}") # 预期：较低
+    print(f"'{chinese_text4}' vs '{chinese_text5}': {sim_overall_cn.calculate_similarity(chinese_text4, chinese_text5):.4f}") # 预期：很高（标点符号被归一化）
+    print(f"'{chinese_text6}' vs '{chinese_text7}': {sim_overall_cn.calculate_similarity(chinese_text6, chinese_text7):.4f}") # 预期：较高（少了“一个”）
+
+    # 聚焦末尾词语测试
+    print("\n--- 中文相似度测试 (End Focus, Last 3 words) ---")
+    sim_end_cn = TextSimilarity(focus='end', n_words=3) # n_words 调小一些，更关注末尾
+    print(f"'{chinese_text1}' vs '{chinese_text2}': {sim_end_cn.calculate_similarity(chinese_text1, chinese_text2):.4f}") # 预期：较低（“测试句子” vs “测试语句”）
+    print(f"'{chinese_text1}' vs '{chinese_text3}': {sim_end_cn.calculate_similarity(chinese_text1, chinese_text3):.4f}") # 预期：很低
+    print(f"'{chinese_text4}' vs '{chinese_text5}': {sim_end_cn.calculate_similarity(chinese_text4, chinese_text5):.4f}") # 预期：1.0000 （末尾词语相同，标点被忽略）
+
+    # 加权相似度测试
+    print("\n--- 中文相似度测试 (Weighted Focus, 70% End, Last 3 words) ---")
+    sim_weighted_cn = TextSimilarity(focus='weighted', n_words=3, end_weight=0.7)
+    print(f"'{chinese_text1}' vs '{chinese_text2}': {sim_weighted_cn.calculate_similarity(chinese_text1, chinese_text2):.4f}") # 预期：中等偏高
+    print(f"'{chinese_text6}' vs '{chinese_text7}': {sim_weighted_cn.calculate_similarity(chinese_text6, chinese_text7):.4f}") # 预期：中等偏高
+
+    # 短中文文本和归一化测试
+    print("\n--- 中文短文本和归一化测试 ---")
+    cn_short1 = "你好啊！"
+    cn_short2 = "你好啊。"
+    cn_short3 = "你好啊"
+    cn_empty_punct = "！？！？"
+    cn_non_string = ["你好"]
+
+    print(f"'{cn_short1}' vs '{cn_short2}' (overall): {sim_overall_cn.calculate_similarity(cn_short1, cn_short2):.4f}") # 预期：1.0000
+    print(f"'{cn_short1}' vs '{cn_short3}' (overall): {sim_overall_cn.calculate_similarity(cn_short1, cn_short3):.4f}") # 预期：1.0000
+    print(f"'{cn_short1}' vs '{cn_empty_punct}' (overall): {sim_overall_cn.calculate_similarity(cn_short1, cn_empty_punct):.4f}") # 预期：0.0000
+    print(f"'{text_empty}' vs '{cn_empty_punct}' (overall): {sim_overall_cn.calculate_similarity(text_empty, cn_empty_punct):.4f}") # 预期：1.0000 (都归一化为空字符串)
+    print(f"'{text_non_string}' vs '{text_empty}' (overall): {sim_overall_cn.calculate_similarity(cn_non_string, text_empty):.4f}") # 预期：1.0000 (非字符串输入也归一化为空字符串)

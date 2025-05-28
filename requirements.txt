@@ -1,6 +1,6 @@
 # speech to text and text to speech
 realtimestt==0.3.104
-realtimetts[kokoro,coqui,orpheus,zh]==0.5.5
+realtimetts[kokoro,coqui,orpheus,jieba, zh]==0.5.5
 
 # webserver dependencies
 fastapi
@@ -21,3 +21,4 @@ ngrok>=1.0.0
 
 transformers==4.47.0
 ctranslate2<4.5.0
+jieba

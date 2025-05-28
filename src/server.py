@@ -894,7 +894,7 @@ async def websocket_endpoint(ws: WebSocket):
     # Set up callback manager - THIS NOW HOLDS THE CONNECTION-SPECIFIC STATE
     callbacks = TranscriptionCallbacks(app, message_queue)
 
-    # Assign callbacks to the AudioInputProcessor (global component)
+    # Assign callbacks to the AudioInputProcessor (global component), Unfortunately, the audio queue is shared and does not support concurrent connection requests.
     # These methods within callbacks will now operate on its *instance* state
     app.state.AudioInputProcessor.realtime_callback = callbacks.on_partial
     app.state.AudioInputProcessor.transcriber.potential_sentence_end = callbacks.on_potential_sentence
