@@ -26,7 +26,7 @@ except FileNotFoundError:
     system_prompt = "You are a helpful assistant."
 
 
-USE_ORPHEUS_UNCENSORED = False
+USE_ORPHEUS_UNCENSORED = True
 
 orpheus_prompt_addon_normal = """
 When expressing emotions, you are ONLY allowed to use the following exact tags (including the spaces):
