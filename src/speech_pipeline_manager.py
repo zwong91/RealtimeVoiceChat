@@ -302,7 +302,7 @@ class SpeechPipelineManager:
 
     def clean_quick_answer(self, text: str) -> str:
         """
-        Removes specific leading patterns (like '<think>', newlines, spaces) from text.
+        Removes specific leading patterns (like '<think>...</think>', newlines, spaces) from text.
 
         Intended for cleaning the initial output of the LLM, especially when `no_think`
         is enabled, to remove processing tags before TTS.
@@ -313,18 +313,18 @@ class SpeechPipelineManager:
         Returns:
             The text with specified leading patterns removed.
         """
-        patterns_to_remove = ["<think>", "</think>", "\n", " "]
         previous_text = None
         current_text = text
-        
+
         while previous_text != current_text:
             previous_text = current_text
-            
-            # Remove all patterns from the beginning of the string
-            for pattern in patterns_to_remove:
-                while current_text.startswith(pattern):
-                    current_text = current_text[len(pattern):]
-        
+
+            # 1. Remove leading <think>...</think> block if it exists at the beginning
+            current_text = re.sub(r'^<think>.*?</think>', '', current_text, flags=re.DOTALL)
+
+            # 2. Remove any leading whitespace and newline characters
+            current_text = re.sub(r'^[\s\n]+', '', current_text)
+
         return current_text
 
     def _llm_inference_worker(self):
