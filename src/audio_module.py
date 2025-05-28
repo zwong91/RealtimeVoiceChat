@@ -130,6 +130,7 @@ class AudioProcessor:
                 extra_end_ms=15,
                 fade_in_ms=15,
                 fade_out_ms=10,
+                debug = True,
             )
             self.engine.set_voice(voice_expr)
         elif engine == "orpheus":
