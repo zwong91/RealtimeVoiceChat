@@ -5,6 +5,7 @@ import logging
 import time
 from queue import Queue, Empty
 import sys
+import re
 
 # (Make sure real/mock imports are correct)
 from audio_module import AudioProcessor

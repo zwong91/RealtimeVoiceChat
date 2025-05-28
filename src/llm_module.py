@@ -643,7 +643,7 @@ class LLM:
 
         if len(messages) == 0 or messages[-1]["role"] != "user":
             added_text = text # for normal text
-            if self.no_think:
+            if self.no_think and self.model.lower().startswith("qwen3"):
                  # This modification logic remains specific for now
                 added_text = f"{text}/nothink" # for qwen 3
             logger.info(f"🧠💬 llm_module.py generate adding role user to messages, content: {added_text}")
