@@ -120,8 +120,9 @@ class AudioProcessor:
                 add_sentence_filter=False,
             )
         elif engine == "kokoro":
+            voice_expr = "0.431 * zf_xiaobei + 0.284 * zf_xiaoyi + 0.078 * af_bella + 0.142 * bf_emma + 0.065 * bf_isabella"
             self.engine = KokoroEngine(
-                voice="0.431 * zf_xiaobei + 0.284 * zf_xiaoyi + 0.078 * af_bella + 0.142 * bf_emma + 0.065 * bf_isabella",
+                voice=voice_expr,
                 default_speed=1.26,
                 trim_silence=True,
                 silence_threshold=0.01,
@@ -130,6 +131,7 @@ class AudioProcessor:
                 fade_in_ms=15,
                 fade_out_ms=10,
             )
+            self.engine.set_voice(voice_expr)
         elif engine == "orpheus":
             self.engine = OrpheusEngine(
                 model=self.orpheus_model,
