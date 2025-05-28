@@ -643,9 +643,9 @@ class LLM:
 
         if len(messages) == 0 or messages[-1]["role"] != "user":
             added_text = text # for normal text
-            if self.no_think and self.model.lower().startswith("qwen3"):
+            if self.no_think and 'qwen3' in self.model.lower():
                  # This modification logic remains specific for now
-                added_text = f"{text}/nothink" # for qwen 3
+                added_text = "/nothink\n" + text # for qwen 3
             logger.info(f"🧠💬 llm_module.py generate adding role user to messages, content: {added_text}")
             messages.append({"role": "user", "content": added_text})
         logger.debug(f"🤖💬 [{req_id}] Prepared messages count: {len(messages)}")
