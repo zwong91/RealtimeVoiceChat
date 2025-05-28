@@ -109,7 +109,7 @@ class AudioProcessor:
                 local_models_path="./models",
                 voice="reference_audio.wav",
                 language="zh",
-                speed=1.1,
+                speed=1.0,
                 use_deepspeed=True,
                 thread_count=6,
                 stream_chunk_size=self.current_stream_chunk_size,
