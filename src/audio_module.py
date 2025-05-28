@@ -120,7 +120,7 @@ class AudioProcessor:
                 add_sentence_filter=False,
             )
         elif engine == "kokoro":
-            voice_expr = "0.431 * zf_xiaobei + 0.284 * zf_xiaoyi + 0.078 * af_bella + 0.142 * bf_emma + 0.065 * bf_isabella"
+            voice_expr = "zf_xiaobei + zf_xiaoyi + af_bella + bf_emma + bf_isabella"
             self.engine = KokoroEngine(
                 voice=voice_expr,
                 default_speed=1.26,
