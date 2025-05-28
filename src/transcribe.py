@@ -446,7 +446,7 @@ class TranscriptionProcessor:
             self,
             text1: str,
             text2: str,
-            similarity_threshold: float = 0.96, # Consider making this configurable
+            similarity_threshold: float = 0.9, # Consider making this configurable
         ) -> bool:
         """
         Checks if two text strings are highly similar, focusing on the ending words.

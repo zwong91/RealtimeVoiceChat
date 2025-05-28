@@ -445,7 +445,7 @@ class SpeechPipelineManager:
 
         Compares the provided text (`txt`) with the text of the `running_generation`.
         If a generation is running and not already aborting:
-        1. If `txt` is very similar (>= 0.95 similarity) to the running generation's
+        1. If `txt` is very similar (>= 0.85 similarity) to the running generation's
            input text, it ignores the new request and returns False.
         2. If `txt` is different, it initiates an abort of the current generation
            by calling the public `abort_generation` method.
@@ -507,7 +507,7 @@ class SpeechPipelineManager:
                         logger.warning(f"🗣️🛑💥 {current_gen_id_str} Error calculating similarity: {e}. Assuming different.")
                         similarity = 0.0 # Assume different on error
 
-                    if similarity >= 0.95:
+                    if similarity >= 0.9:
                         logger.info(f"🗣️🛑🙅 {current_gen_id_str} Text ('{txt[:30]}...') too similar ({similarity:.2f}) to current '{self.running_generation.text[:30] if self.running_generation.text else 'None'}...'. Ignoring.")
                         return False # No abort needed
 

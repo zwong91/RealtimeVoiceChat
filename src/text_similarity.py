@@ -27,7 +27,7 @@ class TextSimilarity:
                             similarity receives a weight of `1.0 - end_weight`.
     """
     def __init__(self,
-                 similarity_threshold: float = 0.96,
+                 similarity_threshold: float = 0.9,
                  n_words: int = 5,
                  focus: str = 'weighted', # Default to weighted approach
                  end_weight: float = 0.7): # Default: 70% weight on end similarity
