@@ -18,11 +18,12 @@ import time
 import threading # Keep threading for SpeechPipelineManager internals and AbortWorker
 import sys
 import os # Added for environment variable access
+import base64
 
 from typing import Any, Dict, Optional, Callable # Added for type hints in docstrings
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import HTMLResponse, Response, FileResponse
@@ -57,7 +58,19 @@ except ValueError:
     MAX_AUDIO_QUEUE_SIZE = 50
 
 
+from utils import ulaw_to_pcm24k
+from twilio.rest import Client
+from twilio.twiml.voice_response import VoiceResponse, Connect
 import ngrok
+from dotenv import load_dotenv
+# 加载环境变量
+load_dotenv(override=True)
+TWILIO_ACCOUNT_SID = os.getenv('TWILIO_ACCOUNT_SID')
+TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN')
+TWILIO_PHONE_NUMBER = os.getenv('TWILIO_PHONE_NUMBER')
+twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+
+NGROK_URL = os.getenv("NGROK_URL", "https://ngrok.io")
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -153,32 +166,73 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount static files with no cache
-app.mount("/static", NoCacheStaticFiles(directory="static"), name="static")
+"""
+Twilio Voice API endpoint to handle incoming calls.
+"""
+@app.post("/twilio/inbound_call")
+async def handle_incoming_call(self, request: Request):
+    """Handle incoming call and return TwiML response to connect to Media Stream."""
+    form_data = await request.form()
+    call_sid = form_data.get('CallSid')
+    from_number = form_data.get("From")
+    to_number = form_data.get("To")
+    logging.info(f"接收到来电，CallSid: {call_sid}, From: {from_number}, To: {to_number}")
+    response = VoiceResponse()
+    # 给来电者语音提示（支持中文语音）
+    response.say("您好，正在为您接通 AI 女友，请稍候...",
+                    voice='Google.cmn-CN-Wavenet-A',
+                    language='cmn-CN')
+    connect = Connect()
+    stream_url = f'wss://{request.url.hostname}/stream'
+    logging.info('Got websocket URL: %s', stream_url)
+    connect.stream(url=stream_url)
+    response.append(connect)
+    return HTMLResponse(content=str(response), media_type="application/xml")
 
-@app.get("/favicon.ico")
-async def favicon():
-    """
-    Serves the favicon.ico file.
+@app.post("/twilio/sms")
+async def handle_sms(request: Request):
+    """Handle incoming SMS messages."""
+    try:
+        data = await request.json()
+        from_number = data.get("From")
+        message_body = data.get('Body')
 
-    Returns:
-        A FileResponse containing the favicon.
-    """
-    return FileResponse("static/favicon.ico")
+        logging.info('Received SMS from %s with message: %s', from_number, message_body)
+        # Set configuration from SMS.
+        SYSTEM_MESSAGE_CONTENT = message_body
+        logging.info('SMS received and updated configuration saved!')
 
-@app.get("/")
-async def get_index() -> HTMLResponse:
-    """
-    Serves the main index.html page.
+        # Send a response back to Twilio.
+        twiml_response = "<Response></Response>"
+        return Response(twiml_response, mimetype="application/xml")
 
-    Reads the content of static/index.html and returns it as an HTML response.
+    except Exception as e:
+        logging.error('Error handling SMS: %s', str(e))
+        raise
 
-    Returns:
-        An HTMLResponse containing the content of index.html.
-    """
-    with open("static/index.html", "r", encoding="utf-8") as f:
-        html_content = f.read()
-    return HTMLResponse(content=html_content)
+@app.post("/twilio/make_call")
+async def make_call(self, request: Request):
+    """Make an outgoing call to the specified phone number."""
+    data = await request.json()
+    to_phone_number = data.get("to")
+    if not to_phone_number:
+        return {"error": "Phone number is required"}
+    call = twilio_client.calls.create(
+        url=f"{NGROK_URL}/outgoing-call",
+        to=to_phone_number,
+        from_=TWILIO_PHONE_NUMBER
+    )
+
+    return {"Call started with SID": call.sid}
+
+@app.api_route("/twilio/outbound_call", methods=["GET", "POST"])
+async def handle_outgoing_call(self, request: Request):
+    """Handle outgoing call and return TwiML response to connect to Media Stream."""
+    response = VoiceResponse()
+    connect = Connect()
+    connect.stream(url=f'wss://{request.url.hostname}/stream')
+    response.append(connect)
+    return HTMLResponse(content=str(response), media_type="application/xml")
 
 # --------------------------------------------------------------------
 # Utility functions
@@ -249,21 +303,19 @@ async def process_incoming_data(ws: WebSocket, app: FastAPI, incoming_chunks: as
     """
     try:
         while True:
-            msg = await ws.receive()
-            if "bytes" in msg and msg["bytes"]:
-                raw = msg["bytes"]
-
-                # Ensure we have at least an 8‑byte header: 4 bytes timestamp_ms + 4 bytes flags
-                if len(raw) < 8:
-                    logger.warning("🖥️⚠️ Received packet too short for 8‑byte header.")
-                    continue
-
-                # Unpack big‑endian uint32 timestamp (ms) and uint32 flags
-                timestamp_ms, flags = struct.unpack("!II", raw[:8])
+            text = await websocket.receive_text()
+            data = parse_json_message(text)
+            if data['event'] == 'media':
+                timestamp_ms = int(data['media']['timestamp'])
+                stream_sid = data['media']['streamSid']
+                sequence_number = data['sequenceNumber']
+                flags = 0
                 client_sent_ns = timestamp_ms * 1_000_000
 
                 # Build metadata using fixed fields
                 metadata = {
+                    "stream_sid":               stream_sid,
+                    "sequence_number":          sequence_number,
                     "client_sent_ms":           timestamp_ms,
                     "client_sent":              client_sent_ns,
                     "client_sent_formatted":    format_timestamp_ns(client_sent_ns),
@@ -276,12 +328,9 @@ async def process_incoming_data(ws: WebSocket, app: FastAPI, incoming_chunks: as
                 metadata["server_received_formatted"] = format_timestamp_ns(server_ns)
 
                 # The rest of the payload is raw PCM bytes
-                metadata["pcm"] = raw[8:]
-
-                client_ts = metadata["client_sent_formatted"]
-                server_ts = metadata["server_received_formatted"]
-                logger.debug(f"msg send ts: {client_ts}, recv ts: {server_ts}")
-
+                chunk = base64.b64decode(data['media']['payload'])
+                metadata["pcm"] = ulaw_to_pcm24k(chunk)
+                logger.info(Colors.apply(f"🖥️📥 ←←Client media message: {metadata}").orange)
                 # Check queue size before putting data
                 current_qsize = incoming_chunks.qsize()
                 if current_qsize < MAX_AUDIO_QUEUE_SIZE:
@@ -293,33 +342,68 @@ async def process_incoming_data(ws: WebSocket, app: FastAPI, incoming_chunks: as
                         f"🖥️⚠️ Audio queue full ({current_qsize}/{MAX_AUDIO_QUEUE_SIZE}); dropping chunk. Possible lag."
                     )
 
-            elif "text" in msg and msg["text"]:
-                # Text-based message: parse JSON
-                data = parse_json_message(msg["text"])
-                msg_type = data.get("type")
-                logger.info(Colors.apply(f"🖥️📥 ←←Client: {data}").orange)
+            elif data['event'] == 'start':
+                stream_sid = data['start']['streamSid']
+                sequence_number = data['sequenceNumber']
+                call_sid = data['start']['callSid']
+                logger.info(Colors.apply(f"🖥️📥 ←←Incoming stream has started streamSid: {stream_sid}, callSid: {call_sid}").orange)
+                # Build metadata using fixed fields
+                client_sent_ns = 0
+                flags = 0
+                metadata = {
+                    "stream_sid":               stream_sid,
+                    "sequence_number":          sequence_number,
+                    "client_sent_ms":           0,
+                    "client_sent":              client_sent_ns,
+                    "client_sent_formatted":    format_timestamp_ns(client_sent_ns),
+                    "isTTSPlaying":             bool(flags & 1),
+                }
 
+                # Record server receive time
+                server_ns = time.time_ns()
+                metadata["server_received"] = server_ns
+                metadata["server_received_formatted"] = format_timestamp_ns(server_ns)
+                metadata["pcm"] = b'\x00'
+                logger.info(Colors.apply(f"🖥️📥 ←←Client start message: {metadata}").orange)
 
-                if msg_type == "tts_start":
-                    logger.info("🖥️ℹ️ Received tts_start from client.")
+                callbacks.stream_sid = stream_sid
+                # Check queue size before putting data
+                current_qsize = incoming_chunks.qsize()
+                if current_qsize < MAX_AUDIO_QUEUE_SIZE:
+                    # Now put only the metadata dict (containing PCM audio) into the processing queue.
+                    await incoming_chunks.put(metadata)
+                else:
+                    # Queue is full, drop the chunk and log a warning
+                    logger.warning(
+                        f"🖥️⚠️ Audio queue full ({current_qsize}/{MAX_AUDIO_QUEUE_SIZE}); dropping chunk. Possible lag."
+                    )
+            elif data['event'] == 'mark':
+                label = data['mark']['name']
+                logger.info(Colors.apply(f"🖥️📥 ←←←←Client Incoming stream mark name: {label}").orange)
+                if callbacks.mark_queue:
+                    callbacks.mark_queue.pop(0)
+
+                if len(callbacks.mark_queue):
                     # Update connection-specific state via callbacks
                     callbacks.tts_client_playing = True
-                elif msg_type == "tts_stop":
+                else:
                     logger.info("🖥️ℹ️ Received tts_stop from client.")
                     # Update connection-specific state via callbacks
                     callbacks.tts_client_playing = False
-                # Add to the handleJSONMessage function in server.py
-                elif msg_type == "clear_history":
-                    logger.info("🖥️ℹ️ Received clear_history from client.")
-                    app.state.SpeechPipelineManager.reset()
-                elif msg_type == "set_speed":
-                    speed_value = data.get("speed", 0)
-                    speed_factor = speed_value / 100.0  # Convert 0-100 to 0.0-1.0
-                    turn_detection = app.state.AudioInputProcessor.transcriber.turn_detection
-                    if turn_detection:
-                        turn_detection.update_settings(speed_factor)
-                        logger.info(f"🖥️⚙️ Updated turn detection settings to factor: {speed_factor:.2f}")
 
+                # speed_value = data.get("speed", 0)
+                # speed_factor = speed_value / 100.0  # Convert 0-100 to 0.0-1.0
+                # turn_detection = app.state.AudioInputProcessor.transcriber.turn_detection
+                # if turn_detection:
+                #     turn_detection.update_settings(speed_factor)
+                #     logger.info(f"🖥️⚙️ Updated turn detection settings to factor: {speed_factor:.2f}")
+
+            elif data['event'] == 'stop':
+                account_sid = data['stop']['accountSid']
+                call_sid = data['stop']['callSid']
+                logger.info(Colors.apply(f"🖥️📥 ←←←←Client stop stream {label}").gray)
+                logger.info("🖥️ℹ️ Received clear_history from client.")
+                app.state.SpeechPipelineManager.reset()
 
     except asyncio.CancelledError:
         pass # Task cancellation is expected on disconnect
@@ -345,8 +429,8 @@ async def send_text_messages(ws: WebSocket, message_queue: asyncio.Queue) -> Non
         while True:
             await asyncio.sleep(0.001) # Yield control
             data = await message_queue.get()
-            msg_type = data.get("type")
-            if msg_type != "tts_chunk":
+            msg_type = data.get("event")
+            if msg_type != "media":
                 logger.info(Colors.apply(f"🖥️📤 →→Client: {data}").orange)
             await ws.send_json(data)
     except asyncio.CancelledError:
@@ -495,9 +579,21 @@ async def send_tts_chunks(app: FastAPI, message_queue: asyncio.Queue, callbacks:
 
             base64_chunk = app.state.Upsampler.get_base64_chunk(chunk)
             message_queue.put_nowait({
-                "type": "tts_chunk",
-                "content": base64_chunk
+                "event": "media",
+                "streamSid": callbacks.stream_sid,
+                "media": {
+                    "payload": base64_chunk
+                }
             })
+            label = "tts_start"
+            message_queue.put_nowait({
+                "event": "mark",
+                "streamSid": callbacks.stream_sid,
+                "mark": {
+                    "name": label
+                }
+            })
+            callbacks.mark_queue.append(label)
             last_chunk_sent = time.time()
 
             # Use connection-specific state via callbacks
@@ -540,6 +636,8 @@ class TranscriptionCallbacks:
         """
         self.app = app
         self.message_queue = message_queue
+        self.stream_sid = None
+        self.mark_queue = []
         self.final_transcription = ""
         self.abort_text = ""
         self.last_abort_text = ""
@@ -622,7 +720,7 @@ class TranscriptionCallbacks:
         self.final_assistant_answer_sent = False # New user speech invalidates previous final answer sending state
         self.final_transcription = "" # Clear final transcription as this is partial
         self.partial_transcription = txt
-        self.message_queue.put_nowait({"type": "partial_user_request", "content": txt})
+        self.message_queue.put_nowait({"event": "partial_user_request", "streamSid": self.stream_sid, "content": txt})
         self.abort_text = txt # Update text used for abort check
         self.abort_request_event.set() # Signal the abort worker
 
@@ -699,7 +797,8 @@ class TranscriptionCallbacks:
         # Send final user request (using the reliable final_transcription OR current partial if final isn't set yet)
         user_request_content = self.final_transcription if self.final_transcription else self.partial_transcription
         self.message_queue.put_nowait({
-            "type": "final_user_request",
+            "event": "final_user_request",
+            "streamSid": self.stream_sid,
             "content": user_request_content
         })
 
@@ -710,7 +809,8 @@ class TranscriptionCallbacks:
             if self.app.state.SpeechPipelineManager.running_generation.quick_answer and not self.user_interrupted:
                 self.assistant_answer = self.app.state.SpeechPipelineManager.running_generation.quick_answer
                 self.message_queue.put_nowait({
-                    "type": "partial_assistant_answer",
+                    "event": "partial_assistant_answer",
+                    "streamSid": self.stream_sid,
                     "content": self.assistant_answer
                 })
 
@@ -773,7 +873,8 @@ class TranscriptionCallbacks:
             # Use connection-specific tts_to_client flag
             if self.tts_to_client:
                 self.message_queue.put_nowait({
-                    "type": "partial_assistant_answer",
+                    "event": "partial_assistant_answer",
+                    "streamSid": self.stream_sid,
                     "content": txt
                 })
 
@@ -802,8 +903,8 @@ class TranscriptionCallbacks:
 
             logger.info("🖥️🛑 Sending stop_tts to client.")
             self.message_queue.put_nowait({
-                "type": "stop_tts", # Client handles this to mute/ignore
-                "content": ""
+                "event": "clear", # Client handles this to mute/ignore
+                "streamSid": self.stream_sid,
             })
 
             logger.info(f"{Colors.apply('🖥️🛑 RECORDING START ABORTING GENERATION').red}")
@@ -811,8 +912,8 @@ class TranscriptionCallbacks:
 
             logger.info("🖥️❗ Sending tts_interruption to client.")
             self.message_queue.put_nowait({ # Tell client to stop playback and clear buffer
-                "type": "tts_interruption",
-                "content": ""
+                "event": "clear",
+                "streamSid": self.stream_sid,
             })
 
             # Reset state *after* performing actions based on the old state
@@ -858,7 +959,8 @@ class TranscriptionCallbacks:
             if cleaned_answer: # Ensure it's not empty after cleaning
                 logger.info(f"\n{Colors.apply('🖥️✅ FINAL ASSISTANT ANSWER (Sending): ').green}{cleaned_answer}")
                 self.message_queue.put_nowait({
-                    "type": "final_assistant_answer",
+                    "event": "final_assistant_answer",
+                    "streamSid": self.stream_sid,
                     "content": cleaned_answer
                 })
                 app.state.SpeechPipelineManager.history.append({"role": "assistant", "content": cleaned_answer})
@@ -873,10 +975,11 @@ class TranscriptionCallbacks:
              self.final_assistant_answer = "" # Clear the stored answer
 
 
+
 # --------------------------------------------------------------------
 # Main WebSocket endpoint
 # --------------------------------------------------------------------
-@app.websocket("/ws")
+@app.websocket("/stream")
 async def websocket_endpoint(ws: WebSocket):
     """
     Handles the main WebSocket connection for real-time voice chat.
@@ -948,8 +1051,37 @@ async def websocket_endpoint(ws: WebSocket):
 if __name__ == "__main__":
 
     # Open Ngrok tunnel
-    listener = ngrok.forward(f"http://localhost:8000", authtoken=os.getenv("NGROK_AUTHTOKEN", "2q0o5XSi73aG9m4KyMxHB0pmEXi_2mUYW4R1wDsanPzWgCWrW"))
+    listener = ngrok.forward(f"http://localhost:8000", authtoken=os.getenv("NGROK_AUTHTOKEN", ""))
     logger.debug(f"Ingress Ngrok tunnel opened at {listener.url()} for port 8000")
+    NGROK_URL = listener.url()
+    INCOMING_CALL_ROUTE = "/twilio/inbound_call"
+    # Set ngrok URL to ne the webhook for the appropriate Twilio number
+    twilio_numbers = twilio_client.incoming_phone_numbers.list()
+    twilio_number_sid = [num.sid for num in twilio_numbers if num.phone_number == TWILIO_PHONE_NUMBER][0]
+    twilio_client.incoming_phone_numbers(twilio_number_sid).update(TWILIO_ACCOUNT_SID, voice_url=f"{NGROK_URL}{INCOMING_CALL_ROUTE}")
+
+    # 获取所有的 SIP 域名
+    sip_domains = twilio_client.sip.domains.list()
+
+    # 遍历每个 SIP 域名并更新其 voice_url
+    for domain in sip_domains:
+        updated_domain = twilio_client.sip.domains(domain.sid).update(voice_url=f"{NGROK_URL}{INCOMING_CALL_ROUTE}")
+
+    # outgoing call test
+    to_phone_number = "sip:abc@jokerrr.sip.twilio.com"
+    try:
+        call = twilio_client.calls.create(
+            url=f"{NGROK_URL}/twilio/outbound_call",
+            to=to_phone_number,
+            from_=TWILIO_PHONE_NUMBER
+        )
+        sms_data = {
+            'from': TWILIO_PHONE_NUMBER,
+            'to': to_phone_number,
+        }
+        logging.info(f"外打电话，CallSid: {call.sid}, From: {TWILIO_PHONE_NUMBER}, To: {to_phone_number}")
+    except Exception as e:
+        print(f"Error initiating call: {e}")
 
     # Run the server without SSL
     if not USE_SSL:
