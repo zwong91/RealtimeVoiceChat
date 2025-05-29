@@ -58,7 +58,6 @@ except ValueError:
     MAX_AUDIO_QUEUE_SIZE = 50
 
 
-from utils import ulaw_to_pcm24k
 from twilio.rest import Client
 from twilio.twiml.voice_response import VoiceResponse, Connect
 import ngrok
@@ -281,6 +280,43 @@ def format_timestamp_ns(timestamp_ns: int) -> str:
 
     return formatted_timestamp
 
+
+
+import audioop
+import numpy as np
+from scipy.signal import resample_poly, butter, filtfilt
+
+def ulaw_to_pcm24k_fast(audio_bytes_ulaw, input_rate=8000, output_rate=24000):
+    """
+    Fast version without anti-aliasing filter for real-time applications.
+    
+    Args:
+        audio_bytes_ulaw: Input μ-law encoded audio bytes
+        input_rate: Input sample rate (default: 8000 Hz)
+        output_rate: Output sample rate (default: 24000 Hz)
+    
+    Returns:
+        bytes: PCM 16-bit audio data at output_rate
+    """
+    if not audio_bytes_ulaw:
+        return b''
+    
+    # μ-law → PCM 16-bit
+    pcm_input = audioop.ulaw2lin(audio_bytes_ulaw, 2)
+    audio_np = np.frombuffer(pcm_input, dtype=np.int16)
+    
+    if len(audio_np) == 0:
+        return b''
+    
+    # Direct upsampling using polyphase filter (no pre-filtering)
+    if output_rate != input_rate:
+        audio_float = audio_np.astype(np.float32) / 32768.0
+        audio_resampled = resample_poly(audio_float, output_rate, input_rate)
+        audio_clipped = np.clip(audio_resampled * 32767, -32768, 32767)
+        return audio_clipped.astype(np.int16).tobytes()
+    else:
+        return audio_np.tobytes()
+
 # --------------------------------------------------------------------
 # WebSocket data processing
 # --------------------------------------------------------------------
@@ -329,7 +365,7 @@ async def process_incoming_data(ws: WebSocket, app: FastAPI, incoming_chunks: as
 
                 # The rest of the payload is raw PCM bytes
                 chunk = base64.b64decode(data['media']['payload'])
-                metadata["pcm"] = ulaw_to_pcm24k(chunk)
+                metadata["pcm"] = ulaw_to_pcm24k_fast(chunk)
                 logger.info(Colors.apply(f"🖥️📥 ←←Client media message: {metadata}").orange)
                 # Check queue size before putting data
                 current_qsize = incoming_chunks.qsize()

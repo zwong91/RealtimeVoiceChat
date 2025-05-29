@@ -1,9 +1,8 @@
 import base64
 import numpy as np
+import audioop
 from scipy.signal import resample_poly, butter, filtfilt
 from typing import Optional
-
-from utils import pcm24k_to_ulaw
 
 class UpsampleOverlap:
     """
@@ -104,9 +103,10 @@ class UpsampleOverlap:
         self.previous_chunk = audio_filtered
         self.resampled_previous_chunk = downsampled_current_chunk # Store the downsampled *current* chunk for the *next* overlap
 
-        # Convert the extracted part to PCM16 bytes, then use utility function to convert to μ-law
+        # Convert the extracted part to PCM16 bytes, then directly convert to μ-law
         pcm16_bytes = (part * 32767).astype(np.int16).tobytes()
-        ulaw_bytes = pcm24k_to_ulaw(pcm16_bytes, input_rate=8000, target_rate=8000)
+        import audioop
+        ulaw_bytes = audioop.lin2ulaw(pcm16_bytes, 2)  # Direct PCM16 to μ-law conversion
         return base64.b64encode(ulaw_bytes).decode('utf-8')
 
     def flush_base64_chunk(self) -> Optional[str]:
@@ -126,7 +126,8 @@ class UpsampleOverlap:
         if self.resampled_previous_chunk is not None:
             # Return the entire last downsampled chunk converted to μ-law
             pcm16_bytes = (self.resampled_previous_chunk * 32767).astype(np.int16).tobytes()
-            ulaw_bytes = pcm24k_to_ulaw(pcm16_bytes, input_rate=8000, target_rate=8000)
+            import audioop
+            ulaw_bytes = audioop.lin2ulaw(pcm16_bytes, 2)  # Direct PCM16 to μ-law conversion
 
             # Clear state after flushing
             self.previous_chunk = None
