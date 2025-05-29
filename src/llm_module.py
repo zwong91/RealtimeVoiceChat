@@ -698,6 +698,7 @@ class LLM:
                 payload = {
                     "model": self.model,
                     "messages": messages,
+                    "think": False,
                     "stream": True,
                     "options": options
                 }

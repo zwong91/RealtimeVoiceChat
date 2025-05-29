@@ -99,8 +99,8 @@ uv pip install -r requirements.txt
 # Install ollama https://github.com/ollama/ollama/releases
 (curl -fsSL https://ollama.com/install.sh | sh && ollama serve > ollama.log 2>&1) &
 
-#ollama pull hf.co/bartowski/huihui-ai_Mistral-Small-24B-Instruct-2501-abliterated-GGUF:Q4_K_M
-ollama pull qwen3:30b-a3b
+ollama pull hf.co/bartowski/huihui-ai_Mistral-Small-24B-Instruct-2501-abliterated-GGUF:Q4_K_M
+#ollama pull qwen3:30b-a3b
 # ## zh-hans
 # mkdir -p /root/stanza_resources/zh-hans/
 
