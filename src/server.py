@@ -278,6 +278,7 @@ async def process_incoming_data(ws: WebSocket, app: FastAPI, incoming_chunks: as
                 # The rest of the payload is raw PCM bytes
                 metadata["pcm"] = raw[8:]
 
+                logger.debug(f"msg send ts: {metadata["client_sent_formatted"]}, recv ts: {metadata["server_received_formatted"]}")
                 # Check queue size before putting data
                 current_qsize = incoming_chunks.qsize()
                 if current_qsize < MAX_AUDIO_QUEUE_SIZE:
