@@ -17,7 +17,7 @@ from RealtimeTTS import (CoquiEngine, KokoroEngine, OrpheusEngine,
 logger = logging.getLogger(__name__)
 
 # Default configuration constants
-START_ENGINE = "kokoro"
+START_ENGINE = "coqui"
 Silence = namedtuple("Silence", ("comma", "sentence", "default"))
 ENGINE_SILENCES = {
     "coqui":   Silence(comma=0.3, sentence=0.6, default=0.3),

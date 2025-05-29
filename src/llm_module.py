@@ -87,7 +87,7 @@ def _create_openai_client(api_key: Optional[str], base_url: Optional[str] = None
         effective_key = api_key if api_key else "no-key-needed"
         client_args = {
             "api_key": effective_key,
-            "timeout": 30.0,
+            "timeout": 10.0,
             "max_retries": 2
         }
         if base_url:

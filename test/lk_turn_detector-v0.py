@@ -13,7 +13,7 @@ import time
 # Constants
 HG_MODEL = "livekit/turn-detector"
 ONNX_FILENAME = "model_q8.onnx"
-MODEL_REVISION = "v1.2.0"
+MODEL_REVISION = "main"
 
 MAX_HISTORY = 6
 MAX_HISTORY_TOKENS = 128

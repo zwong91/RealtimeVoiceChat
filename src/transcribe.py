@@ -29,8 +29,8 @@ DEFAULT_RECORDER_CONFIG: Dict[str, Any] = {
     "realtime_model_type": "small",
     "use_main_model_for_realtime": False,
     "language": "zh", # Default, will be overridden by source_language in __init__
-    "silero_sensitivity": 0.05,
-    "webrtc_sensitivity": 3,
+    "silero_sensitivity": 0.4,
+    "webrtc_sensitivity": 2,
     "post_speech_silence_duration": 0.7,
     "min_length_of_recording": 0.5,
     "min_gap_between_recordings": 0,

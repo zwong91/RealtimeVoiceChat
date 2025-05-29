@@ -338,7 +338,7 @@ class TurnDetection:
             'ellipsis_pause': 2.3,
             'punctuation_pause': 0.39,
             'exclamation_pause': 0.35,
-            'question_pause': 0.33,
+            'question_pause': 0.33,``
             'unknown_sentence_detection_pause': 1.25
         }
 
