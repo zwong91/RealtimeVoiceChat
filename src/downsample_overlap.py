@@ -10,7 +10,7 @@ class ResampleOverlap:
     使用更高质量的 Kaiser 滤波窗提升重采样精度。
     """
 
-    def __init__(self, input_fs: int = 24000, output_fs: int = 8000, overlap_ms: int = 20):
+    def __init__(self, input_fs: int = 24000, output_fs: int = 8000, overlap_ms: int = 40):
         self.input_fs = input_fs
         self.output_fs = output_fs
         self.overlap_samples_in = int(input_fs * overlap_ms / 1000)
