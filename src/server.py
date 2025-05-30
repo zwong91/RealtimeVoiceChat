@@ -229,7 +229,7 @@ async def handle_outgoing_call(request: Request):
     """Handle outgoing call and return TwiML response to connect to Media Stream."""
     response = VoiceResponse()
     connect = Connect()
-    connect.stream(url=f'wss://{request.url.hostname}/stream')
+    connect.stream(url=f'wss://{request.url.hostname}/media-stream')
     response.append(connect)
     return HTMLResponse(content=str(response), media_type="application/xml")
 
