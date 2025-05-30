@@ -630,6 +630,7 @@ async def send_tts_chunks(app: FastAPI, message_queue: asyncio.Queue, callbacks:
                 }
             })
             callbacks.mark_queue.append(label)
+            callbacks.tts_client_playing = True
             last_chunk_sent = time.time()
 
             # Use connection-specific state via callbacks
@@ -756,7 +757,7 @@ class TranscriptionCallbacks:
         self.final_assistant_answer_sent = False # New user speech invalidates previous final answer sending state
         self.final_transcription = "" # Clear final transcription as this is partial
         self.partial_transcription = txt
-        self.message_queue.put_nowait({"event": "partial_user_request", "streamSid": self.stream_sid, "content": txt})
+        #self.message_queue.put_nowait({"event": "partial_user_request", "content": txt})
         self.abort_text = txt # Update text used for abort check
         self.abort_request_event.set() # Signal the abort worker
 
@@ -832,11 +833,10 @@ class TranscriptionCallbacks:
 
         # Send final user request (using the reliable final_transcription OR current partial if final isn't set yet)
         user_request_content = self.final_transcription if self.final_transcription else self.partial_transcription
-        self.message_queue.put_nowait({
-            "event": "final_user_request",
-            "streamSid": self.stream_sid,
-            "content": user_request_content
-        })
+        # self.message_queue.put_nowait({
+        #     "event": "final_user_request",
+        #     "content": user_request_content
+        # })
 
         # Access global manager state
         if self.app.state.SpeechPipelineManager.is_valid_gen():
@@ -844,11 +844,10 @@ class TranscriptionCallbacks:
             # Use connection-specific user_interrupted flag
             if self.app.state.SpeechPipelineManager.running_generation.quick_answer and not self.user_interrupted:
                 self.assistant_answer = self.app.state.SpeechPipelineManager.running_generation.quick_answer
-                self.message_queue.put_nowait({
-                    "event": "partial_assistant_answer",
-                    "streamSid": self.stream_sid,
-                    "content": self.assistant_answer
-                })
+                # self.message_queue.put_nowait({
+                #     "event": "partial_assistant_answer",
+                #     "content": self.assistant_answer
+                # })
 
         logger.info(f"🖥️🧠 Adding user request to history: '{user_request_content}'")
         # Access global manager state
@@ -907,12 +906,11 @@ class TranscriptionCallbacks:
         if not self.user_interrupted:
             self.assistant_answer = txt
             # Use connection-specific tts_to_client flag
-            if self.tts_to_client:
-                self.message_queue.put_nowait({
-                    "event": "partial_assistant_answer",
-                    "streamSid": self.stream_sid,
-                    "content": txt
-                })
+            # if self.tts_to_client:
+            #     self.message_queue.put_nowait({
+            #         "event": "partial_assistant_answer",
+            #         "content": txt
+            #     })
 
     def on_recording_start(self):
         """
@@ -994,11 +992,10 @@ class TranscriptionCallbacks:
 
             if cleaned_answer: # Ensure it's not empty after cleaning
                 logger.info(f"\n{Colors.apply('🖥️✅ FINAL ASSISTANT ANSWER (Sending): ').green}{cleaned_answer}")
-                self.message_queue.put_nowait({
-                    "event": "final_assistant_answer",
-                    "streamSid": self.stream_sid,
-                    "content": cleaned_answer
-                })
+                # self.message_queue.put_nowait({
+                #     "event": "final_assistant_answer",
+                #     "content": cleaned_answer
+                # })
                 app.state.SpeechPipelineManager.history.append({"role": "assistant", "content": cleaned_answer})
                 self.final_assistant_answer_sent = True
                 self.final_assistant_answer = cleaned_answer # Store the sent answer
@@ -1100,8 +1097,7 @@ if __name__ == "__main__":
     sip_domains = twilio_client.sip.domains.list()
 
     # 遍历每个 SIP 域名并更新其 voice_url
-    for domain in sip_domains:
-        updated_domain = twilio_client.sip.domains(domain.sid).update(voice_url=f"{NGROK_URL}{INCOMING_CALL_ROUTE}")
+    [twilio_client.sip.domains(d.sid).update(voice_url=f"{NGROK_URL}{INCOMING_CALL_ROUTE}") for d in sip_domains]
 
     # outgoing call test
     to_phone_number = "sip:abc@jokerrr.sip.twilio.com"
@@ -1111,10 +1107,6 @@ if __name__ == "__main__":
             to=to_phone_number,
             from_=TWILIO_PHONE_NUMBER
         )
-        sms_data = {
-            'from': TWILIO_PHONE_NUMBER,
-            'to': to_phone_number,
-        }
         logging.info(f"外打电话，CallSid: {call.sid}, From: {TWILIO_PHONE_NUMBER}, To: {to_phone_number}")
     except Exception as e:
         print(f"Error initiating call: {e}")

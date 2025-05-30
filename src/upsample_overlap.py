@@ -105,7 +105,6 @@ class UpsampleOverlap:
 
         # Convert the extracted part to PCM16 bytes, then directly convert to μ-law
         pcm16_bytes = (part * 32767).astype(np.int16).tobytes()
-        import audioop
         ulaw_bytes = audioop.lin2ulaw(pcm16_bytes, 2)  # Direct PCM16 to μ-law conversion
         return base64.b64encode(ulaw_bytes).decode('utf-8')
 
@@ -126,7 +125,6 @@ class UpsampleOverlap:
         if self.resampled_previous_chunk is not None:
             # Return the entire last downsampled chunk converted to μ-law
             pcm16_bytes = (self.resampled_previous_chunk * 32767).astype(np.int16).tobytes()
-            import audioop
             ulaw_bytes = audioop.lin2ulaw(pcm16_bytes, 2)  # Direct PCM16 to μ-law conversion
 
             # Clear state after flushing
