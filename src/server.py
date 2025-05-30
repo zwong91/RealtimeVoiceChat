@@ -19,7 +19,6 @@ import threading # Keep threading for SpeechPipelineManager internals and AbortW
 import sys
 import os # Added for environment variable access
 import base64
-import torch
 
 from typing import Any, Dict, Optional, Callable # Added for type hints in docstrings
 from contextlib import asynccontextmanager
@@ -299,21 +298,23 @@ def ulaw_to_pcm16k(audio_bytes_ulaw, input_rate=8000, output_rate=16000):
 
     return audio_resampled.tobytes()
 
-def pcm16k_to_ulaw(pcm_data_16k: bytes, input_rate=16000, target_rate=8000) -> bytes:
-    # Step 1: 转换为 numpy array，int16
-    pcm_array = np.frombuffer(pcm_data_16k, dtype=np.int16)
+def downsample_pcm(self, chunk: bytes) -> bytes:
+    downsampled_chunk, _ = audioop.ratecv(
+        chunk,
+        2,
+        1,
+        24000,
+        8000,
+        None,
+    )
 
-    # Step 2: 降采样到 8000 Hz
-    resample_len = int(len(pcm_array) * target_rate / input_rate)
-    resampled = signal.resample(pcm_array, resample_len).astype(np.int16)
+    return downsampled_chunk
 
-    # Step 3: 转换为 bytes
-    resampled_bytes = resampled.tobytes()
-
-    # Step 4: PCM -> μ-law
-    ulaw_data = audioop.lin2ulaw(resampled_bytes, 2)  # 2 bytes per sample (16-bit)
-
-    return ulaw_data
+def downsample_mulaw(self, chunk: bytes) -> bytes:
+    pcm_data = audioop.ulaw2lin(chunk, 2)
+    downsampled_pcm_data = downsample_pcm(pcm_data)
+    downsampled_chunk = audioop.lin2ulaw(downsampled_pcm_data, 2)
+    return base64.b64encode(downsampled_chunk).decode('utf-8')
 
 # --------------------------------------------------------------------
 # WebSocket data processing
@@ -601,7 +602,8 @@ async def send_tts_chunks(app: FastAPI, message_queue: asyncio.Queue, callbacks:
                 continue
 
             # # such as chunk size 9600, (a.k.a 24K*20ms*2)
-            base64_chunk = app.state.Downsampler.get_base64_chunk(chunk)
+            base64_chunk = downsample_mulaw(chunk)
+            #base64_chunk = app.state.Downsampler.get_base64_chunk(chunk)
             message_queue.put_nowait({
                 "event": "media",
                 "streamSid": callbacks.stream_sid,
