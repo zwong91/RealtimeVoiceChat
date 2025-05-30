@@ -7,60 +7,58 @@ from typing import Optional, Tuple
 class ResampleOverlapUlaw:
     """
     Manages chunk-wise audio resampling (e.g., 24kHz to 8kHz) and µ-law encoding
-    with an optimized overlap-save strategy to mitigate boundary artifacts and noise.
+    with overlap-save handling to mitigate boundary artifacts.
 
-    This version uses a longer overlap and a specific Kaiser window for resampling
-    to improve smoothness and filter performance.
+    This class processes sequential audio chunks (assumed 16-bit PCM),
+    resamples them, converts them to 8-bit µ-law, and manages overlap
+    between chunks. The processed, resampled, µ-law encoded audio segments
+    are returned as Base64 encoded strings. It maintains internal state to
+    handle the overlap correctly across calls.
     """
     INPUT_SR = 24000
     OUTPUT_SR = 8000
-
-    # Increased overlap duration in milliseconds.
-    # A longer overlap provides more context for the filter, reducing edge artifacts.
-    OVERLAP_MS = 60 # Increased from 30ms, can be tuned further (e.g., 40, 80)
-
-    # Kaiser window parameters for resample_poly.
-    # Beta > 5 gives more stopband attenuation. Beta=8.0 is a common choice for good attenuation.
-    # This can help reduce aliasing artifacts if the default filter was insufficient.
-    KAISER_WINDOW_PARAMS = ('kaiser', 8.0) # Default for resample_poly is ('kaiser', 5.0)
+    # Overlap duration in milliseconds. This should be sufficient to cover
+    # the transient response of the resample_poly filter. 20-40ms is common.
+    OVERLAP_MS = 100
 
     # Calculate overlap samples at input and output rates
-    # Ensure these are integers
-    OVERLAP_SAMPLES_IN = int(INPUT_SR * OVERLAP_MS / 1000.0)
+    # These are float values initially, then cast to int.
+    _OVERLAP_SAMPLES_IN_FLOAT = INPUT_SR * OVERLAP_MS / 1000.0
+    OVERLAP_SAMPLES_IN = int(_OVERLAP_SAMPLES_IN_FLOAT)
 
     # The number of samples to discard from the beginning of the resampled output.
-    # This should correspond to the length of the resampled version of OVERLAP_SAMPLES_IN.
-    # The output length of resample_poly is floor(input_len * up / down).
-    # So, the length of the resampled overlap to discard is:
-    # floor(OVERLAP_SAMPLES_IN * OUTPUT_SR / INPUT_SR)
-    # However, to be robust and ensure the transient is fully covered,
-    # using ceil(OUTPUT_SR * OVERLAP_MS / 1000.0) is often safer for the discard length.
-    OVERLAP_SAMPLES_OUT = int(np.ceil(OUTPUT_SR * OVERLAP_MS / 1000.0))
-    # Alternative strict calculation based on resample_poly behavior:
-    # OVERLAP_SAMPLES_OUT = int(np.floor(OVERLAP_SAMPLES_IN * OUTPUT_SR / INPUT_SR))
+    # This corresponds to the OVERLAP_SAMPLES_IN prepended before resampling.
+    # Must be calculated carefully to match the resampling ratio.
+    # For resample_poly, the output length is floor(input_len * up / down).
+    # So, the length of the resampled overlap is floor(OVERLAP_SAMPLES_IN * OUTPUT_SR / INPUT_SR).
+    # However, to be robust, we resample a block of (OVERLAP_SAMPLES_IN + CHUNK_SAMPLES_IN),
+    # and then discard the portion corresponding to OVERLAP_SAMPLES_IN.
+    # The length of the resampled version of OVERLAP_SAMPLES_IN is what we need to discard.
+    # For FIR filters in resample_poly, the group delay is roughly half the filter length.
+    # A simpler way for overlap-save is to make the discard length:
+    OVERLAP_SAMPLES_OUT = int(OUTPUT_SR * OVERLAP_MS / 1000.0)
 
 
     def __init__(self):
         """
-        Initializes the ResampleOverlapUlawOptimized processor.
+        Initializes the ResampleOverlapUlaw processor.
+        Sets up internal state for overlap handling.
         """
+        # Stores the tail of the *previous input chunk* (24kHz float32) to be
+        # prepended to the current chunk for overlap-save.
         self.input_overlap_buffer: Optional[np.ndarray] = None
         self.is_first_chunk: bool = True
-        if self.OVERLAP_SAMPLES_IN == 0 and self.OVERLAP_MS > 0:
-            print(f"Warning: OVERLAP_SAMPLES_IN is 0 with OVERLAP_MS={self.OVERLAP_MS}. "
-                  f"Input SR might be too low or OVERLAP_MS too small for effective sample count.")
-        elif self.OVERLAP_SAMPLES_OUT == 0 and self.OVERLAP_MS > 0:
-             print(f"Warning: OVERLAP_SAMPLES_OUT is 0 with OVERLAP_MS={self.OVERLAP_MS}. "
-                  f"Output SR might be too low or OVERLAP_MS too small for effective sample count.")
-
 
     def _pcm_float_to_ulaw_bytes(self, audio_float: np.ndarray) -> bytes:
         """Converts float32 PCM audio (-1.0 to 1.0) to µ-law bytes."""
         if audio_float.size == 0:
             return b""
-        # Clip to ensure values are within int16 range before conversion
-        audio_int16 = np.clip(audio_float * 32768.0, -32768.0, 32767.0).astype(np.int16)
+        # Convert float32 to int16
+        audio_int16 = (audio_float * 32767.0).astype(np.int16)
+        # Convert int16 numpy array to bytes
         pcm_bytes = audio_int16.tobytes()
+        # Convert linear PCM bytes to µ-law bytes
+        # The '2' indicates 2 bytes per sample for the input pcm_bytes
         ulaw_audio_bytes = audioop.lin2ulaw(pcm_bytes, 2)
         return ulaw_audio_bytes
 
@@ -68,8 +66,18 @@ class ResampleOverlapUlaw:
         """
         Processes an incoming audio chunk, resamples it to 8kHz, converts to
         µ-law, and returns the relevant segment as Base64.
+
+        Args:
+            chunk_bytes: Raw audio data bytes (PCM 16-bit signed integer format, 24kHz).
+
+        Returns:
+            A Base64 encoded string representing the resampled, µ-law encoded
+            audio segment. Returns an empty string if the input chunk is empty
+            and results in no processable audio.
         """
         if not chunk_bytes:
+            # If the input chunk is empty, there's nothing to process from it.
+            # If there was a previous overlap buffer, it should be flushed separately.
             return ""
 
         audio_int16 = np.frombuffer(chunk_bytes, dtype=np.int16)
@@ -78,100 +86,83 @@ class ResampleOverlapUlaw:
 
         current_input_float = audio_int16.astype(np.float32) / 32768.0
 
-        # Prepare block for resampling by prepending overlap
+        # Prepare the block for resampling by prepending overlap
         if self.is_first_chunk:
-            if self.OVERLAP_SAMPLES_IN > 0:
-                prepend_data = np.zeros(self.OVERLAP_SAMPLES_IN, dtype=np.float32)
-                block_to_resample = np.concatenate((prepend_data, current_input_float))
-            else: # No overlap configured
-                block_to_resample = current_input_float
+            # For the first chunk, prepend zeros to stabilize the filter.
+            # The length of zeros should match OVERLAP_SAMPLES_IN.
+            prepend_data = np.zeros(self.OVERLAP_SAMPLES_IN, dtype=np.float32)
+            block_to_resample = np.concatenate((prepend_data, current_input_float))
             self.is_first_chunk = False
-        elif self.input_overlap_buffer is not None and self.input_overlap_buffer.size > 0:
-            # Prepend the saved overlap from the previous chunk
+        elif self.input_overlap_buffer is not None:
             block_to_resample = np.concatenate((self.input_overlap_buffer, current_input_float))
-        else: # No overlap buffer available (e.g. if OVERLAP_SAMPLES_IN is 0 or it was an empty chunk before)
-            if self.OVERLAP_SAMPLES_IN > 0: # Still attempt to prepend zeros if overlap is configured
-                prepend_data = np.zeros(self.OVERLAP_SAMPLES_IN, dtype=np.float32)
-                block_to_resample = np.concatenate((prepend_data, current_input_float))
-            else:
-                block_to_resample = current_input_float
-
-
-        # Resample using the specified Kaiser window
-        resampled_float = resample_poly(
-            block_to_resample,
-            self.OUTPUT_SR,
-            self.INPUT_SR,
-            window=self.KAISER_WINDOW_PARAMS
-        )
-
-        # Discard the initial part of the resampled block (the "save" part of overlap-save)
-        if self.OVERLAP_SAMPLES_OUT > 0 and resampled_float.size > self.OVERLAP_SAMPLES_OUT:
-            output_segment_float = resampled_float[self.OVERLAP_SAMPLES_OUT:]
-        elif self.OVERLAP_SAMPLES_OUT == 0 : # No output overlap discard configured
-             output_segment_float = resampled_float
         else:
-            # Resampled block is too short to discard the full overlap.
-            # This can happen if (input_chunk + overlap_buffer) is very small.
-            # Outputting nothing is safer to avoid artifacts.
+            # Should not happen after the first chunk if input_overlap_buffer is managed correctly
+            # For safety, behave like the first chunk if input_overlap_buffer is somehow None
+            prepend_data = np.zeros(self.OVERLAP_SAMPLES_IN, dtype=np.float32)
+            block_to_resample = np.concatenate((prepend_data, current_input_float))
+
+
+        # Resample (e.g., 24kHz to 8kHz)
+        # `up` is OUTPUT_SR, `down` is INPUT_SR. Simplified: up=1, down=3 for 8k from 24k
+        resampled_float = resample_poly(block_to_resample, self.OUTPUT_SR, self.INPUT_SR)
+
+        # Discard the initial part of the resampled block that corresponds to the overlap
+        # This is the "save" part of overlap-save.
+        # The number of samples to discard is OVERLAP_SAMPLES_OUT.
+        if resampled_float.size > self.OVERLAP_SAMPLES_OUT:
+            output_segment_float = resampled_float[self.OVERLAP_SAMPLES_OUT:]
+        else:
+            # This can happen if the input chunk + overlap is very small,
+            # resulting in a resampled block shorter than the discard length.
+            # Output nothing in this case from this chunk, and carry over the input.
             output_segment_float = np.array([], dtype=np.float32)
 
-        # Save the tail of the *current input chunk* for the next iteration's overlap
-        if self.OVERLAP_SAMPLES_IN > 0:
-            if current_input_float.size >= self.OVERLAP_SAMPLES_IN:
-                self.input_overlap_buffer = current_input_float[-self.OVERLAP_SAMPLES_IN:]
-            else:
-                # If current chunk is shorter than overlap, pad it with leading zeros
-                # to make its length OVERLAP_SAMPLES_IN for the buffer.
-                # This ensures the next chunk always gets a consistently sized overlap.
-                # Alternatively, just save what's available:
-                self.input_overlap_buffer = current_input_float.copy()
-                # If a consistent overlap buffer length is strictly needed for some reason:
-                # padding_zeros = np.zeros(self.OVERLAP_SAMPLES_IN - current_input_float.size, dtype=np.float32)
-                # self.input_overlap_buffer = np.concatenate((padding_zeros, current_input_float))
-        else: # No overlap configured
-            self.input_overlap_buffer = None
-
+        # Save the tail of the *current input chunk* (at 24kHz) for the next iteration's overlap
+        if current_input_float.size >= self.OVERLAP_SAMPLES_IN:
+            self.input_overlap_buffer = current_input_float[-self.OVERLAP_SAMPLES_IN:]
+        else:
+            # If current chunk is shorter than overlap, the whole chunk becomes overlap
+            self.input_overlap_buffer = current_input_float.copy() # Use copy
 
         if output_segment_float.size == 0:
             return ""
 
+        # Convert the valid output segment to µ-law bytes
         ulaw_bytes = self._pcm_float_to_ulaw_bytes(output_segment_float)
+
         return base64.b64encode(ulaw_bytes).decode('utf-8')
 
     def flush_base64_chunk(self) -> str:
         """
-        Processes any remaining audio in the internal overlap buffer.
+        Processes any remaining audio in the internal overlap buffer, resamples
+        it, converts to µ-law, and returns as Base64. This should be called
+        once after all input chunks have been passed to get_base64_chunk.
+
+        Returns:
+            A Base64 encoded string for the final audio segment, or an empty
+            string if there's nothing to flush.
         """
         output_str = ""
         if self.input_overlap_buffer is not None and self.input_overlap_buffer.size > 0:
-            # This is the final segment of actual input audio.
-            # To resample it correctly, prepend zeros for filter stabilization,
-            # then discard the resampled portion corresponding to these leading zeros.
-
-            if self.OVERLAP_SAMPLES_IN > 0:
-                prepend_zeros = np.zeros(self.OVERLAP_SAMPLES_IN, dtype=np.float32)
-                # The block for resampling is the leading zeros + the final audio buffer
-                block_to_resample = np.concatenate((prepend_zeros, self.input_overlap_buffer))
-            else: # No overlap configured
-                 block_to_resample = self.input_overlap_buffer
-
-
-            resampled_float = resample_poly(
-                block_to_resample,
-                self.OUTPUT_SR,
-                self.INPUT_SR,
-                window=self.KAISER_WINDOW_PARAMS
-            )
-
-            # Discard the part corresponding to the prepended zeros
-            if self.OVERLAP_SAMPLES_OUT > 0 and resampled_float.size > self.OVERLAP_SAMPLES_OUT:
+            # Treat the remaining overlap buffer as the final piece of audio.
+            # To properly resample this final segment without cutting off filter effects,
+            # we can conceptually think of it as a chunk prepended by zeros (as it's the end).
+            # Or, if resample_poly handles edges well for short inputs, just resample it.
+            # For overlap-save, the self.input_overlap_buffer is the part that hasn't generated
+            # its corresponding output yet. We resample it directly.
+            
+            # To ensure filter stabilization for this last bit, we can prepend zeros
+            # and then take the relevant part.
+            prepend_zeros = np.zeros(self.OVERLAP_SAMPLES_IN, dtype=np.float32)
+            block_to_resample = np.concatenate((prepend_zeros, self.input_overlap_buffer))
+            
+            resampled_float = resample_poly(block_to_resample, self.OUTPUT_SR, self.INPUT_SR)
+            
+            # We discard the part corresponding to prepend_zeros
+            if resampled_float.size > self.OVERLAP_SAMPLES_OUT:
                 final_segment_float = resampled_float[self.OVERLAP_SAMPLES_OUT:]
-            elif self.OVERLAP_SAMPLES_OUT == 0: # No output overlap discard
-                final_segment_float = resampled_float
-            else: # Resampled output too short
+            else:
                 final_segment_float = np.array([], dtype=np.float32)
-
 
             if final_segment_float.size > 0:
                 ulaw_bytes = self._pcm_float_to_ulaw_bytes(final_segment_float)
@@ -184,47 +175,39 @@ class ResampleOverlapUlaw:
 
 # --- Example Usage (for testing) ---
 if __name__ == '__main__':
-    processor = ResampleOverlapUlawOptimized()
+    processor = ResampleOverlapUlaw()
 
-    chunk_duration_ms = 100 # Duration of each input audio chunk
-    chunk_samples = int(processor.INPUT_SR * chunk_duration_ms / 1000.0)
+    # Simulate incoming audio chunks (24kHz, 16-bit PCM)
+    # Each sample is 2 bytes. Chunk size in samples.
+    # Let's say 100ms chunks: 0.1 * 24000 = 2400 samples = 4800 bytes
+    chunk_samples = 2400
     num_chunks = 5
 
     print(f"Input SR: {processor.INPUT_SR} Hz, Output SR: {processor.OUTPUT_SR} Hz (µ-law)")
-    print(f"Overlap: {processor.OVERLAP_MS} ms, Kaiser Window: {processor.KAISER_WINDOW_PARAMS}")
-    print(f"Input Overlap Samples (at {processor.INPUT_SR}Hz): {processor.OVERLAP_SAMPLES_IN}")
-    print(f"Output Discard Samples (at {processor.OUTPUT_SR}Hz): {processor.OVERLAP_SAMPLES_OUT}")
-    print(f"Input chunk samples: {chunk_samples} ({chunk_duration_ms}ms)")
+    print(f"Overlap: {processor.OVERLAP_MS} ms")
+    print(f"Input Overlap Samples (24kHz): {processor.OVERLAP_SAMPLES_IN}")
+    print(f"Output Discard Samples (8kHz): {processor.OVERLAP_SAMPLES_OUT}")
     print("-" * 30)
 
     all_output_ulaw_bytes = b""
-    total_input_samples_processed = 0 # For generating continuous test signal
 
     for i in range(num_chunks):
-        # Create a dummy audio chunk (e.g., a sine wave segment with continuous phase)
-        frequency = 440 + i * 110 # Vary frequency to test transitions
-        
-        # Calculate time array for this chunk ensuring phase continuity
-        t_start_offset = total_input_samples_processed / processor.INPUT_SR
-        t_chunk_relative = np.arange(chunk_samples) / processor.INPUT_SR
-        t_absolute = t_start_offset + t_chunk_relative
-        
-        signal_chunk_float = 0.6 * np.sin(2 * np.pi * frequency * t_absolute) # Amplitude 0.6
+        # Create a dummy audio chunk (e.g., a sine wave segment)
+        # Make frequency change per chunk to hear transitions
+        frequency = 440 + i * 100
+        t = np.arange(chunk_samples) / processor.INPUT_SR
+        # Ensure signal is within int16 range for realistic input
+        signal_chunk_float = 0.5 * np.sin(2 * np.pi * frequency * t)
         signal_chunk_int16 = (signal_chunk_float * 32767).astype(np.int16)
         chunk_bytes = signal_chunk_int16.tobytes()
-        
-        total_input_samples_processed += chunk_samples
 
-        print(f"Processing chunk {i+1}/{num_chunks} (input: {len(chunk_bytes)} bytes, {chunk_samples} samples)")
+        print(f"Processing chunk {i+1}/{num_chunks} (input: {len(chunk_bytes)} bytes)")
         base64_output = processor.get_base64_chunk(chunk_bytes)
         
         if base64_output:
             decoded_ulaw_bytes = base64.b64decode(base64_output)
             all_output_ulaw_bytes += decoded_ulaw_bytes
-            # Expected output samples from this chunk (main part)
-            expected_output_samples_chunk = int(np.floor(chunk_samples * processor.OUTPUT_SR / processor.INPUT_SR))
-            print(f" -> Output: {len(base64_output)} b64 chars ({len(decoded_ulaw_bytes)} µ-law bytes, "
-                  f"expected ~{expected_output_samples_chunk} samples from current chunk's main part)")
+            print(f" -> Output: {len(base64_output)} b64 chars ({len(decoded_ulaw_bytes)} µ-law bytes)")
         else:
             print(f" -> Output: Empty")
 
@@ -234,33 +217,25 @@ if __name__ == '__main__':
     if base64_flush_output:
         decoded_ulaw_bytes = base64.b64decode(base64_flush_output)
         all_output_ulaw_bytes += decoded_ulaw_bytes
-        # Expected output samples from flush (corresponds to OVERLAP_SAMPLES_IN)
-        expected_output_samples_flush = 0
-        if processor.OVERLAP_SAMPLES_IN > 0 :
-             expected_output_samples_flush = int(np.floor(processor.OVERLAP_SAMPLES_IN * processor.OUTPUT_SR / processor.INPUT_SR))
-        print(f" -> Flushed output: {len(base64_flush_output)} b64 chars ({len(decoded_ulaw_bytes)} µ-law bytes, "
-              f"expected ~{expected_output_samples_flush} samples from final overlap)")
+        print(f" -> Flushed output: {len(base64_flush_output)} b64 chars ({len(decoded_ulaw_bytes)} µ-law bytes)")
     else:
         print(f" -> Flushed output: Empty")
 
     print("-" * 30)
     print(f"Total µ-law bytes generated: {len(all_output_ulaw_bytes)}")
-    # Calculate total expected output samples based on total input samples
-    expected_total_output_samples = int(np.floor(total_input_samples_processed * processor.OUTPUT_SR / processor.INPUT_SR))
-    print(f"Expected total µ-law samples (approx): {expected_total_output_samples}")
 
-
+    # To verify, you might save `all_output_ulaw_bytes` to a .ul file
+    # or convert it back to PCM and listen.
+    # For example, saving to a raw µ-law file:
     if all_output_ulaw_bytes:
-        filename_ulaw = "output_8k_optimized.ulaw"
-        filename_wav = "output_8k_optimized_reverted_pcm.wav"
-        with open(filename_ulaw, "wb") as f:
+        with open("output_8k.ulaw", "wb") as f:
             f.write(all_output_ulaw_bytes)
-        print(f"Saved total output to {filename_ulaw}")
-        print(f"You can play it with SoX: play -r {processor.OUTPUT_SR} -e u-law -b 8 -c 1 {filename_ulaw}")
+        print("Saved total output to output_8k.ulaw")
+        print("You can play it with SoX: play -r 8000 -e u-law -b 8 -c 1 output_8k.ulaw")
 
         # Optional: Convert back to PCM for analysis if needed
         # pcm_data_bytes = audioop.ulaw2lin(all_output_ulaw_bytes, 2)
         # pcm_data_int16 = np.frombuffer(pcm_data_bytes, dtype=np.int16)
         # from scipy.io.wavfile import write as wav_write
-        # wav_write(filename_wav, processor.OUTPUT_SR, pcm_data_int16)
-        # print(f"Saved reverted PCM to {filename_wav}")
+        # wav_write("output_8k_reverted_pcm.wav", processor.OUTPUT_SR, pcm_data_int16)
+        # print("Saved reverted PCM to output_8k_reverted_pcm.wav")
