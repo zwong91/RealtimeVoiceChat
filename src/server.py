@@ -602,8 +602,8 @@ async def send_tts_chunks(app: FastAPI, message_queue: asyncio.Queue, callbacks:
                 continue
 
             # # such as chunk size 9600, (a.k.a 24K*20ms*2)
-            base64_chunk = downsample_mulaw(chunk)
-            #base64_chunk = app.state.Downsampler.get_base64_chunk(chunk)
+            #base64_chunk = downsample_mulaw(chunk)
+            base64_chunk = app.state.Downsampler.get_base64_chunk(chunk)
             message_queue.put_nowait({
                 "event": "media",
                 "streamSid": callbacks.stream_sid,
