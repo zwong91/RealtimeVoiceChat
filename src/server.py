@@ -1,9 +1,9 @@
 # server.py
 from queue import Queue, Empty
-import logger
+import logging
 from logsetup import setup_logging
-setup_logging(logger.INFO)
-logger = logger.getLogger(__name__)
+setup_logging(logging.INFO)
+logger = logging.getLogger(__name__)
 if __name__ == "__main__":
     logger.info("🖥️👋 Welcome to local real-time voice chat")
 
