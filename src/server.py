@@ -315,17 +315,6 @@ def pcm16k_to_ulaw(pcm_data_16k: bytes, input_rate=16000, target_rate=8000) -> b
 
     return ulaw_data
 
-def postprocess_tts_wave_int16(chunk: torch.Tensor | list) -> bytes:
-    r"""
-    Post process the output waveform with numpy.int16 to bytes
-    """
-    if isinstance(chunk, list):
-        chunk = torch.cat(chunk, dim=0)
-    chunk = chunk.clone().detach().cpu().numpy()
-    chunk = chunk * (2**15)
-    chunk = chunk.astype(np.int16)
-    return chunk.tobytes()
-
 
 def convertSampleRateTo16khz(audio_data: bytes | bytearray, original_sample_rate):
     if original_sample_rate == 16000:
@@ -629,8 +618,7 @@ async def send_tts_chunks(app: FastAPI, message_queue: asyncio.Queue, callbacks:
                 log_status()
                 continue
 
-            processed_bytes = postprocess_tts_wave_int16(chunk)
-            pcm_data_16K = convertSampleRateTo16khz(processed_bytes, 24000)
+            pcm_data_16K = convertSampleRateTo16khz(chunk, 24000)
             # such as chunk size 9600, (a.k.a 24K*20ms*2)
             base64_chunk = base64.b64encode(pcm16k_to_ulaw(pcm_data_16K)).decode('utf-8')
             message_queue.put_nowait({
