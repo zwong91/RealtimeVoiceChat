@@ -1,9 +1,9 @@
 # server.py
 from queue import Queue, Empty
-import logging
+import logger
 from logsetup import setup_logging
-setup_logging(logging.INFO)
-logger = logging.getLogger(__name__)
+setup_logging(logger.INFO)
+logger = logger.getLogger(__name__)
 if __name__ == "__main__":
     logger.info("🖥️👋 Welcome to local real-time voice chat")
 
@@ -175,15 +175,15 @@ async def handle_incoming_call(self, request: Request):
     # call_sid = form_data.get('CallSid')
     # from_number = form_data.get("From")
     # to_number = form_data.get("To")
-    # logging.info(f"接收到来电，CallSid: {call_sid}, From: {from_number}, To: {to_number}")
+    # logger.info(f"接收到来电，CallSid: {call_sid}, From: {from_number}, To: {to_number}")
     response = VoiceResponse()
     # 给来电者语音提示（支持中文语音）
     response.say("您好，正在为您接通 AI 女友，请稍候...",
                     voice='Google.cmn-CN-Wavenet-A',
                     language='cmn-CN')
     connect = Connect()
-    stream_url = f'wss://{request.url.hostname}/stream'
-    logging.info('Got websocket URL: %s', stream_url)
+    stream_url = f'wss://{request.url.hostname}/media-stream'
+    logger.info('Got websocket URL: %s', stream_url)
     connect.stream(url=stream_url)
     response.append(connect)
     return HTMLResponse(content=str(response), media_type="application/xml")
@@ -196,17 +196,17 @@ async def handle_sms(request: Request):
         from_number = data.get("From")
         message_body = data.get('Body')
 
-        logging.info('Received SMS from %s with message: %s', from_number, message_body)
+        logger.info('Received SMS from %s with message: %s', from_number, message_body)
         # Set configuration from SMS.
         SYSTEM_MESSAGE_CONTENT = message_body
-        logging.info('SMS received and updated configuration saved!')
+        logger.info('SMS received and updated configuration saved!')
 
         # Send a response back to Twilio.
         twiml_response = "<Response></Response>"
         return Response(twiml_response, mimetype="application/xml")
 
     except Exception as e:
-        logging.error('Error handling SMS: %s', str(e))
+        logger.error('Error handling SMS: %s', str(e))
         raise
 
 @app.post("/twilio/make_call")
@@ -1012,7 +1012,7 @@ class TranscriptionCallbacks:
 # --------------------------------------------------------------------
 # Main WebSocket endpoint
 # --------------------------------------------------------------------
-@app.websocket("/stream")
+@app.websocket("/media-stream")
 async def websocket_endpoint(ws: WebSocket):
     """
     Handles the main WebSocket connection for real-time voice chat.
@@ -1107,7 +1107,7 @@ if __name__ == "__main__":
             to=to_phone_number,
             from_=TWILIO_PHONE_NUMBER
         )
-        logging.info(f"外打电话，CallSid: {call.sid}, From: {TWILIO_PHONE_NUMBER}, To: {to_phone_number}")
+        logger.info(f"外打电话，CallSid: {call.sid}, From: {TWILIO_PHONE_NUMBER}, To: {to_phone_number}")
     except Exception as e:
         print(f"Error initiating call: {e}")
 
