@@ -285,6 +285,7 @@ def format_timestamp_ns(timestamp_ns: int) -> str:
 import audioop
 import numpy as np
 from scipy import signal
+import librosa
 
 def ulaw_to_pcm16k(audio_bytes_ulaw, input_rate=8000, output_rate=16000):
     # μ-law → PCM 16-bit (8kHz)
@@ -316,22 +317,18 @@ def pcm16k_to_ulaw(pcm_data_16k: bytes, input_rate=16000, target_rate=8000) -> b
     return ulaw_data
 
 
-def convertSampleRateTo16khz(audio_data: bytes | bytearray, original_sample_rate):
-    if original_sample_rate == 16000:
-        return audio_data
+def convertSampleRateToUlaw(audio_data: bytes | bytearray, original_sample_rate):
+    audio_array = np.frombuffer(audio_data, dtype=np.int16)
+    audio_array = audio_array.astype(np.float32)
+    data = librosa.resample(
+        y=audio_array, orig_sr=24000, target_sr=16000
+    )
+    data = data * (1 << 15)
+    data = data.astype(np.int16)
+    ulaw_audio = audioop.lin2ulaw(data.tobytes(), 2)
+    payload = base64.b64encode(ulaw_audio).decode()
 
-    pcm_data = np.frombuffer(audio_data, dtype=np.int16)
-    pcm_data_16K = resample_audio(pcm_data, original_sample_rate, 16000)
-    audio_data = pcm_data_16K.tobytes()
-
-    return audio_data
-
-
-def resample_audio(pcm_data: np.ndarray, original_rate: int, target_rate: int) -> np.ndarray:
-    num_samples = int(len(pcm_data) * target_rate / original_rate)
-    resampled_audio = signal.resample(pcm_data, num_samples)
-    # resampled_audio = signal.resample_poly(pcm_data, target_rate, original_rate)
-    return resampled_audio.astype(np.int16)
+    return payload
 
 # --------------------------------------------------------------------
 # WebSocket data processing
@@ -618,10 +615,9 @@ async def send_tts_chunks(app: FastAPI, message_queue: asyncio.Queue, callbacks:
                 log_status()
                 continue
 
-            # pcm_data_16K = convertSampleRateTo16khz(chunk, 24000)
+            base64_chunk = convertSampleRateToUlaw(chunk, 24000)
             # # such as chunk size 9600, (a.k.a 24K*20ms*2)
-            # base64_chunk = base64.b64encode(pcm16k_to_ulaw(pcm_data_16K)).decode('utf-8')
-            base64_chunk = app.state.Downsampler.get_base64_chunk(chunk)
+            #base64_chunk = app.state.Downsampler.get_base64_chunk(chunk)
             message_queue.put_nowait({
                 "event": "media",
                 "streamSid": callbacks.stream_sid,
