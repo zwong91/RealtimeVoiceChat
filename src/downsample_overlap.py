@@ -89,9 +89,9 @@ class ResampleOverlapUlaw:
             # This is the clean version of the first chunk, resampled
             clean_downsampled_first_chunk = downsampled_padded_first_chunk[padding_samples_out:]
 
-            # Output the first 1/3 of this clean downsampled first chunk
+            # Output the first 1/2 of this clean downsampled first chunk
             # (as per original strategy's division)
-            overlap_len_out = len(clean_downsampled_first_chunk) // 3
+            overlap_len_out = len(clean_downsampled_first_chunk) // 2
             part = clean_downsampled_first_chunk[:overlap_len_out]
             
             # For state, use the consistently (unpadded here, or padded for flush) resampled current chunk
@@ -110,16 +110,16 @@ class ResampleOverlapUlaw:
             prev_resampled_isolated_len = len(self.resampled_previous_chunk)
             
             # Start index for extraction from up_combined_resampled:
-            # Skip the first 1/3 of D(C_prev_isolated)'s length.
-            # This part corresponds to D(C_prev_in_context_of_C_curr)[prev_resampled_isolated_len//3 : prev_resampled_isolated_len]
-            h_prev = prev_resampled_isolated_len // 3
+            # Skip the first 1/2 of D(C_prev_isolated)'s length.
+            # This part corresponds to D(C_prev_in_context_of_C_curr)[prev_resampled_isolated_len//2 : prev_resampled_isolated_len]
+            h_prev = prev_resampled_isolated_len // 2
 
             # End index for extraction:
             # This determines how much of D(C_curr_in_context_of_C_prev) to take.
             # (len(up_combined_resampled) - prev_resampled_isolated_len) is approx. len(D(C_curr_isolated))
-            # We take the first 1/3 of this part.
+            # We take the first 1/2 of this part.
             current_chunk_contrib_len_in_up = len(up_combined_resampled) - prev_resampled_isolated_len
-            h_cur = prev_resampled_isolated_len + (current_chunk_contrib_len_in_up // 3)
+            h_cur = prev_resampled_isolated_len + (current_chunk_contrib_len_in_up // 2)
             
             part = up_combined_resampled[h_prev:h_cur]
 
@@ -152,17 +152,17 @@ class ResampleOverlapUlaw:
             or None if no chunks were processed or if flush has already been called.
         """
         if self.resampled_previous_chunk is not None and self.resampled_previous_chunk.size > 0:
-            # Output the remaining 2/3 of the last processed chunk
-            overlap_len_out = len(self.resampled_previous_chunk) // 3
+            # Output the remaining 1/2 of the last processed chunk
+            overlap_len_out = len(self.resampled_previous_chunk) // 2
             
             # Ensure we don't take a negative slice if overlap_len_out is 0 for very small chunks
             if overlap_len_out == 0 and len(self.resampled_previous_chunk) > 0: 
-                # If chunk is too small for 1/3 overlap, flush what's left (which might be all of it if it's tiny)
+                # If chunk is too small for 1/2 overlap, flush what's left (which might be all of it if it's tiny)
                 # This case should be rare with typical audio chunk sizes.
                 # The first part (if any) would have been output in get_base64_chunk.
                 # If it's the only chunk, [:0] was output, so flush all.
-                # If it's a subsequent chunk, [:Ld//3] of it was output.
-                # For simplicity and robustness with tiny chunks, if Ld//3 is 0,
+                # If it's a subsequent chunk, [:Ld//2] of it was output.
+                # For simplicity and robustness with tiny chunks, if Ld//2 is 0,
                 # we assume the logic in get_base64_chunk for h_prev:h_cur effectively handled it.
                 # The most consistent is to stick to the rule:
                 final_part_to_output = self.resampled_previous_chunk[overlap_len_out:]
