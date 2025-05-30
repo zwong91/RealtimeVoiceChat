@@ -31,7 +31,7 @@ class ResampleOverlapUlaw:
         # Rule of thumb: ~30-100 samples for typical resampling scenarios.
         # This depends on the filter length implicit in resample_poly.
         # For 24kHz -> 8kHz, a modest padding like 96 input samples (4ms) is often sufficient.
-        self.initial_padding_samples_in: int = 96
+        self.initial_padding_samples_in: int = 192
         # self.end_padding_samples_in: int = 96 # For potentially cleaner flush (see note below)
 
 
