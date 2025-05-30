@@ -19,6 +19,7 @@ import threading # Keep threading for SpeechPipelineManager internals and AbortW
 import sys
 import os # Added for environment variable access
 import base64
+import torch
 
 from typing import Any, Dict, Optional, Callable # Added for type hints in docstrings
 from contextlib import asynccontextmanager
@@ -281,41 +282,67 @@ def format_timestamp_ns(timestamp_ns: int) -> str:
     return formatted_timestamp
 
 
-
 import audioop
 import numpy as np
-from scipy.signal import resample_poly, butter, filtfilt
+from scipy import signal
 
-def ulaw_to_pcm24k_fast(audio_bytes_ulaw, input_rate=8000, output_rate=24000):
+def ulaw_to_pcm16k(audio_bytes_ulaw, input_rate=8000, output_rate=16000):
+    # μ-law → PCM 16-bit (8kHz)
+    pcm_8k = audioop.ulaw2lin(audio_bytes_ulaw, 2)  # 2 bytes = 16-bit
+
+    # 转成 numpy array
+    audio_np = np.frombuffer(pcm_8k, dtype=np.int16)
+
+    # 升采样到 16kHz
+    num_samples = int(len(audio_np) * output_rate / input_rate)
+    audio_resampled = signal.resample(audio_np, num_samples).astype(np.int16)
+
+    return audio_resampled.tobytes()
+
+def pcm16k_to_ulaw(pcm_data_16k: bytes, input_rate=16000, target_rate=8000) -> bytes:
+    # Step 1: 转换为 numpy array，int16
+    pcm_array = np.frombuffer(pcm_data_16k, dtype=np.int16)
+
+    # Step 2: 降采样到 8000 Hz
+    resample_len = int(len(pcm_array) * target_rate / input_rate)
+    resampled = signal.resample(pcm_array, resample_len).astype(np.int16)
+
+    # Step 3: 转换为 bytes
+    resampled_bytes = resampled.tobytes()
+
+    # Step 4: PCM -> μ-law
+    ulaw_data = audioop.lin2ulaw(resampled_bytes, 2)  # 2 bytes per sample (16-bit)
+
+    return ulaw_data
+
+def postprocess_tts_wave_int16(chunk: torch.Tensor | list) -> bytes:
+    r"""
+    Post process the output waveform with numpy.int16 to bytes
     """
-    Fast version without anti-aliasing filter for real-time applications.
-    
-    Args:
-        audio_bytes_ulaw: Input μ-law encoded audio bytes
-        input_rate: Input sample rate (default: 8000 Hz)
-        output_rate: Output sample rate (default: 24000 Hz)
-    
-    Returns:
-        bytes: PCM 16-bit audio data at output_rate
-    """
-    if not audio_bytes_ulaw:
-        return b''
-    
-    # μ-law → PCM 16-bit
-    pcm_input = audioop.ulaw2lin(audio_bytes_ulaw, 2)
-    audio_np = np.frombuffer(pcm_input, dtype=np.int16)
-    
-    if len(audio_np) == 0:
-        return b''
-    
-    # Direct upsampling using polyphase filter (no pre-filtering)
-    if output_rate != input_rate:
-        audio_float = audio_np.astype(np.float32) / 32768.0
-        audio_resampled = resample_poly(audio_float, output_rate, input_rate)
-        audio_clipped = np.clip(audio_resampled * 32767, -32768, 32767)
-        return audio_clipped.astype(np.int16).tobytes()
-    else:
-        return audio_np.tobytes()
+    if isinstance(chunk, list):
+        chunk = torch.cat(chunk, dim=0)
+    chunk = chunk.clone().detach().cpu().numpy()
+    chunk = chunk * (2**15)
+    chunk = chunk.astype(np.int16)
+    return chunk.tobytes()
+
+
+def convertSampleRateTo16khz(audio_data: bytes | bytearray, original_sample_rate):
+    if original_sample_rate == 16000:
+        return audio_data
+
+    pcm_data = np.frombuffer(audio_data, dtype=np.int16)
+    pcm_data_16K = resample_audio(pcm_data, original_sample_rate, 16000)
+    audio_data = pcm_data_16K.tobytes()
+
+    return audio_data
+
+
+def resample_audio(pcm_data: np.ndarray, original_rate: int, target_rate: int) -> np.ndarray:
+    num_samples = int(len(pcm_data) * target_rate / original_rate)
+    resampled_audio = signal.resample(pcm_data, num_samples)
+    # resampled_audio = signal.resample_poly(pcm_data, target_rate, original_rate)
+    return resampled_audio.astype(np.int16)
 
 # --------------------------------------------------------------------
 # WebSocket data processing
@@ -363,9 +390,9 @@ async def process_incoming_data(ws: WebSocket, app: FastAPI, incoming_chunks: as
                 metadata["server_received"] = server_ns
                 metadata["server_received_formatted"] = format_timestamp_ns(server_ns)
 
-                # The rest of the payload is raw PCM bytes
+                # The rest of the payload is raw PCM bytes g711_ulaw format
                 chunk = base64.b64decode(data['media']['payload'])
-                metadata["pcm"] = ulaw_to_pcm24k_fast(chunk)
+                metadata["pcm"] = ulaw_to_pcm16k(chunk)
                 # Check queue size before putting data
                 current_qsize = incoming_chunks.qsize()
                 if current_qsize < MAX_AUDIO_QUEUE_SIZE:
@@ -602,7 +629,10 @@ async def send_tts_chunks(app: FastAPI, message_queue: asyncio.Queue, callbacks:
                 log_status()
                 continue
 
-            base64_chunk = app.state.Downsampler.get_base64_chunk(chunk)
+            processed_bytes = postprocess_tts_wave_int16(chunk)
+            pcm_data_16K = convertSampleRateTo16khz(processed_bytes, 24000)
+            # such as chunk size 9600, (a.k.a 24K*20ms*2)
+            base64_chunk = base64.b64encode(pcm16k_to_ulaw(pcm_data_16K)).decode('utf-8')
             message_queue.put_nowait({
                 "event": "media",
                 "streamSid": callbacks.stream_sid,

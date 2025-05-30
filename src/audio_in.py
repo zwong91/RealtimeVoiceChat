@@ -18,7 +18,7 @@ class AudioInputProcessor:
     It also runs the transcription process in a background task.
     """
 
-    _RESAMPLE_RATIO = 3  # Resample ratio from 48kHz (assumed input) to 16kHz.
+    _RESAMPLE_RATIO = 1  # Resample ratio from 48kHz (assumed input) to 16kHz.
 
     def __init__(
             self,
