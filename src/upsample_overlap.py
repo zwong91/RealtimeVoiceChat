@@ -1,134 +1,141 @@
 import base64
 import numpy as np
-import audioop
-from scipy.signal import resample_poly, butter, filtfilt
+from scipy.signal import resample_poly
 from typing import Optional
+import audioop # For µ-law conversion
 
-class UpsampleOverlap:
+class DownsampleMuLawOverlap:
     """
-    Manages chunk-wise audio downsampling with overlap handling and anti-aliasing filtering.
+    Manages chunk-wise audio downsampling to 8kHz µ-law with overlap handling.
 
-    This class processes sequential audio chunks, applies anti-aliasing filtering,
-    downsamples them from 24kHz to 8kHz using `scipy.signal.resample_poly`, and 
-    manages overlap between chunks to mitigate boundary artifacts. The processed, 
-    downsampled audio segments are converted to μ-law format and returned as Base64 
-    encoded strings. It maintains internal state to handle the overlap correctly across calls.
+    This class processes sequential audio chunks (assumed 24kHz PCM16),
+    downsamples them to 8kHz using `scipy.signal.resample_poly`,
+    manages overlap between chunks to mitigate boundary artifacts, converts
+    the audio to µ-law format, and returns segments as Base64 encoded strings.
+    It maintains internal state to handle the overlap correctly across calls.
     """
+    SOURCE_RATE = 24000
+    TARGET_RATE = 8000
+
     def __init__(self):
         """
-        Initializes the UpsampleOverlap processor.
+        Initializes the DownsampleMuLawOverlap processor.
 
-        Sets up the internal state required for tracking previous audio chunks
-        and their resampled versions to handle overlaps during processing.
-        Also initializes the anti-aliasing filter coefficients.
+        Sets up internal state for tracking previous audio chunks and their
+        resampled versions to handle overlaps.
         """
-        self.previous_chunk: Optional[np.ndarray] = None
-        self.resampled_previous_chunk: Optional[np.ndarray] = None
-        
-        # Anti-aliasing filter setup for 24kHz -> 8kHz downsampling
-        self.nyquist = 24000 / 2  # 12kHz
-        self.cutoff = 3800  # Slightly below 4kHz (Nyquist for 8kHz)
-        self.filter_order = 5
-        self.b, self.a = butter(self.filter_order, self.cutoff / self.nyquist, btype='low')
+        self.previous_chunk_float: Optional[np.ndarray] = None # Stores original 24kHz float audio
+        self.resampled_previous_chunk_float: Optional[np.ndarray] = None # Stores 8kHz resampled float audio
 
     def get_base64_chunk(self, chunk: bytes) -> str:
         """
-        Processes an incoming audio chunk with anti-aliasing, downsamples it to 8kHz, 
-        converts to μ-law, and returns as Base64.
+        Processes an audio chunk, downsamples it to 8kHz µ-law, and returns the segment as Base64.
 
-        Converts the raw PCM bytes (assumed 16-bit signed integer) chunk to a
-        float32 numpy array, normalizes it, applies anti-aliasing filtering,
-        and downsamples from 24kHz to 8kHz. It uses the previous chunk's data 
-        to create an overlap, resamples the combined audio, and extracts the 
-        central portion corresponding primarily to the current chunk, using 
-        overlap to smooth transitions. The state is updated for the next call. 
-        The extracted audio segment is converted to μ-law format and returned 
-        as a Base64 encoded string.
+        Converts raw PCM 16-bit signed integer bytes to a float32 numpy array,
+        normalizes it, and downsamples from 24kHz to 8kHz.
+        It uses the previous chunk's data for overlap, resamples the combined
+        audio, and extracts the central portion corresponding primarily to the
+        current chunk. The state is updated. The extracted audio segment is
+        converted to µ-law bytes and returned as a Base64 encoded string.
 
         Args:
-            chunk: Raw audio data bytes (PCM 16-bit signed integer format expected).
+            chunk: Raw audio data bytes (PCM 16-bit signed integer, 24kHz expected).
 
         Returns:
-            A Base64 encoded string representing the downsampled μ-law audio segment
-            corresponding to the input chunk, adjusted for overlap. Returns an
-            empty string if the input chunk is empty.
+            A Base64 encoded string representing the downsampled 8kHz µ-law audio
+            segment, or an empty string if the input chunk is empty.
         """
+        if not chunk:
+            return ""
+
         audio_int16 = np.frombuffer(chunk, dtype=np.int16)
-        # Handle potential empty chunks gracefully
         if audio_int16.size == 0:
-             return "" # Return empty string for empty input chunk
+             return ""
 
-        audio_float = audio_int16.astype(np.float32) / 32768.0
+        current_audio_float = audio_int16.astype(np.float32) / 32768.0
 
-        # Apply anti-aliasing filter before downsampling
-        if len(audio_float) > 2 * self.filter_order:  # Ensure minimum length for filtering
-            audio_filtered = filtfilt(self.b, self.a, audio_float)
+        # Downsample the current chunk independently first for state and first chunk logic
+        resampled_current_chunk = resample_poly(current_audio_float, self.TARGET_RATE, self.SOURCE_RATE)
+
+        output_segment_float: np.ndarray
+
+        if self.previous_chunk_float is None:
+            # First chunk: Output the first half of its resampled version
+            # This prepares the state for the next chunk to use its second half for overlap.
+            half_len = len(resampled_current_chunk) // 2
+            output_segment_float = resampled_current_chunk[:half_len]
         else:
-            # For very short chunks, skip filtering to avoid artifacts
-            audio_filtered = audio_float
-
-        # Downsample the current chunk independently first, needed for state and first chunk logic
-        downsampled_current_chunk = resample_poly(audio_filtered, 8000, 24000)
-
-        if self.previous_chunk is None:
-            # First chunk: Output the first half of its downsampled version
-            half = len(downsampled_current_chunk) // 2
-            part = downsampled_current_chunk[:half]
-        else:
-            # Subsequent chunks: Combine previous float chunk with current float chunk
-            combined = np.concatenate((self.previous_chunk, audio_filtered))
-            
-            # Apply anti-aliasing filter to the combined chunk if long enough
-            if len(combined) > 2 * self.filter_order:
-                combined_filtered = filtfilt(self.b, self.a, combined)
-            else:
-                combined_filtered = combined
-            
-            # Downsample the combined chunk
-            down = resample_poly(combined_filtered, 8000, 24000)
+            # Subsequent chunks: Combine previous float chunk (24kHz) with current float chunk (24kHz)
+            combined_float = np.concatenate((self.previous_chunk_float, current_audio_float))
+            # Downsample the combined chunk to 8kHz
+            resampled_combined = resample_poly(combined_float, self.TARGET_RATE, self.SOURCE_RATE)
 
             # Calculate lengths and indices for extracting the middle part
-            # Ensure self.resampled_previous_chunk is not None (shouldn't happen here due to outer if)
-            assert self.resampled_previous_chunk is not None
-            prev_len = len(self.resampled_previous_chunk) # Length of the *downsampled* previous chunk
-            h_prev = prev_len // 2 # Midpoint index of the *downsampled* previous chunk
+            # self.resampled_previous_chunk_float is the 8kHz resampled version of the *previous* input chunk
+            assert self.resampled_previous_chunk_float is not None
+            len_resampled_prev = len(self.resampled_previous_chunk_float)
+            
+            # Start index: Midpoint of the resampled previous chunk's contribution in 'resampled_combined'
+            start_index = len_resampled_prev // 2
+            
+            # End index: Midpoint of the resampled current chunk's contribution in 'resampled_combined'
+            # This ensures we take roughly one chunk's worth of new audio, centered around the join.
+            # Length of current chunk's contribution to resampled_combined is (len(resampled_combined) - len_resampled_prev)
+            end_index = len_resampled_prev + ( (len(resampled_combined) - len_resampled_prev) // 2 )
+            
+            output_segment_float = resampled_combined[start_index:end_index]
 
-            # Calculate the end index for the part corresponding to the current chunk's main contribution
-            # This index represents the midpoint of the *current* chunk's contribution within the combined 'down' array.
-            h_cur = (len(down) - prev_len) // 2 + prev_len
+        # Update state for the next iteration
+        self.previous_chunk_float = current_audio_float # Store original 24kHz float
+        self.resampled_previous_chunk_float = resampled_current_chunk # Store 8kHz resampled float
 
-            part = down[h_prev:h_cur]
-
-        # Update state for the next iteration (store filtered version for consistency)
-        self.previous_chunk = audio_filtered
-        self.resampled_previous_chunk = downsampled_current_chunk # Store the downsampled *current* chunk for the *next* overlap
-
-        # Convert the extracted part to PCM16 bytes, then directly convert to μ-law
-        pcm16_bytes = (part * 32767).astype(np.int16).tobytes()
-        ulaw_bytes = audioop.lin2ulaw(pcm16_bytes, 2)  # Direct PCM16 to μ-law conversion
+        # Convert the extracted float segment (8kHz) to µ-law bytes
+        # 1. Convert float32 (normalized) to int16
+        pcm_int16_segment = (output_segment_float * 32767).astype(np.int16)
+        # 2. Convert int16 array to bytes
+        pcm_int16_bytes = pcm_int16_segment.tobytes()
+        # 3. Convert linear PCM16 bytes to µ-law bytes (sample width is 2 bytes for int16)
+        ulaw_bytes = audioop.lin2ulaw(pcm_int16_bytes, 2)
+        
         return base64.b64encode(ulaw_bytes).decode('utf-8')
 
     def flush_base64_chunk(self) -> Optional[str]:
         """
-        Returns the final remaining segment of downsampled μ-law audio after all chunks are processed.
+        Returns the final remaining segment of 8kHz µ-law audio.
 
-        After the last call to `get_base64_chunk`, the state holds the downsampled
-        version of the very last input chunk (`self.resampled_previous_chunk`).
-        This method returns that *entire* final downsampled chunk, converted to
-        μ-law format and encoded as Base64. It then clears the internal state.
-        This should be called once after all input chunks have been passed to `get_base64_chunk`.
+        After the last call to `get_base64_chunk`, this method processes the
+        remaining portion (typically the second half) of the last resampled audio
+        chunk. It converts this segment to µ-law and returns it as a Base64 string.
+        Clears internal state.
 
         Returns:
-            A Base64 encoded string containing the final downsampled μ-law audio chunk,
-            or None if no chunks were processed or if flush has already been called.
+            A Base64 encoded string of the final 8kHz µ-law audio segment,
+            or None if no chunks were processed.
         """
-        if self.resampled_previous_chunk is not None:
-            # Return the entire last downsampled chunk converted to μ-law
-            pcm16_bytes = (self.resampled_previous_chunk * 32767).astype(np.int16).tobytes()
-            ulaw_bytes = audioop.lin2ulaw(pcm16_bytes, 2)  # Direct PCM16 to μ-law conversion
+        if self.resampled_previous_chunk_float is None:
+            return None
 
-            # Clear state after flushing
-            self.previous_chunk = None
-            self.resampled_previous_chunk = None
-            return base64.b64encode(ulaw_bytes).decode('utf-8')
-        return None # Return None if there's nothing to flush
+        # The `get_base64_chunk` method outputs the "first half" of the
+        # resampled_previous_chunk_float's contribution.
+        # So, we need to output the "second half" here.
+        len_last_resampled_chunk = len(self.resampled_previous_chunk_float)
+        start_index_for_flush = len_last_resampled_chunk // 2
+        
+        final_segment_float = self.resampled_previous_chunk_float[start_index_for_flush:]
+
+        if final_segment_float.size == 0:
+            # Clear state even if the remaining part is empty
+            self.previous_chunk_float = None
+            self.resampled_previous_chunk_float = None
+            return None # Or an empty Base64 string for an empty µ-law chunk, e.g., base64.b64encode(b'').decode()
+
+        # Convert to µ-law
+        pcm_int16_segment = (final_segment_float * 32767).astype(np.int16)
+        pcm_int16_bytes = pcm_int16_segment.tobytes()
+        ulaw_bytes = audioop.lin2ulaw(pcm_int16_bytes, 2)
+
+        # Clear state after flushing
+        self.previous_chunk_float = None
+        self.resampled_previous_chunk_float = None
+        
+        return base64.b64encode(ulaw_bytes).decode('utf-8')

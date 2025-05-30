@@ -404,7 +404,7 @@ async def process_incoming_data(ws: WebSocket, app: FastAPI, incoming_chunks: as
                 callbacks.stream_sid = stream_sid
             elif data['event'] == 'mark':
                 label = data['mark']['name']
-                logger.info(Colors.apply(f"🖥️📥 ←←←←Client Incoming stream mark name: {label}").orange)
+                #logger.info(Colors.apply(f"🖥️📥 ←←←←Client Incoming stream mark name: {label}").orange)
                 if callbacks.mark_queue:
                     callbacks.mark_queue.pop(0)
 
