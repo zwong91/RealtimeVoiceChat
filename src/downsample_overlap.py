@@ -4,7 +4,7 @@ from scipy.signal import resample_poly
 import audioop
 from typing import Optional
 
-class ResampleOverlapPCM:
+class ResampleOverlap:
     """
     实现音频流的高质量降采样（24kHz 到 8kHz），加入重叠处理与噪声门限。
 
