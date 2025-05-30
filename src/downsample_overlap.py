@@ -4,7 +4,7 @@ from scipy.signal import resample_poly
 import audioop # For µ-law conversion
 from typing import Optional, Tuple
 
-class ResampleOverlapUlawOptimized:
+class ResampleOverlapUlaw:
     """
     Manages chunk-wise audio resampling (e.g., 24kHz to 8kHz) and µ-law encoding
     with an optimized overlap-save strategy to mitigate boundary artifacts and noise.
