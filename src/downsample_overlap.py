@@ -63,36 +63,3 @@ class ResampleOverlapUlaw:
 
         # Base64 编码
         return base64.b64encode(ulaw_bytes).decode("utf-8")
-
-
-    def flush_base64_chunk(self) -> Optional[str]:
-        """
-        输出最后剩余的重采样音频段，并清理状态。
-
-        通常用于处理完所有输入音频块后，返回最后一块中未输出的部分。
-        数据将被转换为 u-law 编码并以 Base64 字符串返回。
-
-        返回:
-            - Base64 编码的 u-law 音频字符串，如果之前没有数据或已清空，则返回 None。
-        """
-        if self.resampled_previous_chunk is None or self.resampled_previous_chunk.size == 0:
-            return None
-
-        # 取出最后 2/3 的数据（用于减少边界伪影）
-        start_index = self.chunk_size_out // 3
-        final_chunk = self.resampled_previous_chunk[start_index:]
-
-        # 转换为 16-bit PCM 整型格式
-        final_int16 = np.clip(final_chunk * 32768, -32768, 32767).astype(np.int16)
-
-        # 转换为 u-law 编码
-        ulaw_bytes = audioop.lin2ulaw(final_int16.tobytes(), 2)
-
-        # 编码为 Base64
-        encoded = base64.b64encode(ulaw_bytes).decode('ascii')
-
-        # 清除内部状态
-        self.previous_chunk = None
-        self.resampled_previous_chunk = None
-
-        return encoded
