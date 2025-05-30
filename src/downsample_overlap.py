@@ -19,7 +19,7 @@ class ResampleOverlapUlaw:
     OUTPUT_SR = 8000
     # Overlap duration in milliseconds. This should be sufficient to cover
     # the transient response of the resample_poly filter. 20-40ms is common.
-    OVERLAP_MS = 30
+    OVERLAP_MS = 40
 
     # Calculate overlap samples at input and output rates
     # These are float values initially, then cast to int.
