@@ -298,7 +298,7 @@ def ulaw_to_pcm16k(audio_bytes_ulaw, input_rate=8000, output_rate=16000):
 
     return audio_resampled.tobytes()
 
-def downsample_pcm(self, chunk: bytes) -> bytes:
+def downsample_pcm(chunk: bytes) -> bytes:
     downsampled_chunk, _ = audioop.ratecv(
         chunk,
         2,
@@ -310,7 +310,7 @@ def downsample_pcm(self, chunk: bytes) -> bytes:
 
     return downsampled_chunk
 
-def downsample_mulaw(self, chunk: bytes) -> bytes:
+def downsample_mulaw(chunk: bytes) -> bytes:
     pcm_data = audioop.ulaw2lin(chunk, 2)
     downsampled_pcm_data = downsample_pcm(pcm_data)
     downsampled_chunk = audioop.lin2ulaw(downsampled_pcm_data, 2)
