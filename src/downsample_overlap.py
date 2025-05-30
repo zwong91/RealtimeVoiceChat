@@ -13,7 +13,7 @@ class ResampleOverlap:
 
     def __init__(self, input_fs: int = 24000, output_fs: int = 8000,
                  overlap_ms: int = 10, use_ulaw: bool = True,
-                 noise_gate_db: float = -40.0):
+                 noise_gate_db: float = -20.0):
         """
         参数:
             input_fs: 输入采样率（Hz）
