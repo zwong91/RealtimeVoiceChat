@@ -15,7 +15,7 @@ class ResampleOverlapUlaw:
 
     # 重叠时长 (毫秒)
     # 40ms 是一个常用值，在伪影减少和延迟之间取得平衡。
-    OVERLAP_MS = 20
+    OVERLAP_MS = 40
 
     # 根据输入采样率计算重叠样本数
     # 例如: 24000 Hz * 40 ms / 1000 = 960 样本
