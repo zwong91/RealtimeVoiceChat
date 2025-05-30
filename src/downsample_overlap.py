@@ -12,7 +12,7 @@ class ResampleOverlapUlaw:
     并使用 u-law 编码和 Base64 编码返回结果。它内部维护状态以实现块之间的重叠处理。
     """
 
-    def __init__(self, input_fs: int = 24000, output_fs: int = 8000, overlap_ms: int = 8):
+    def __init__(self, input_fs: int = 24000, output_fs: int = 8000, overlap_ms: int = 10):
         self.input_fs = input_fs
         self.output_fs = output_fs
         self.overlap_samples_in = int(input_fs * overlap_ms / 1000)
