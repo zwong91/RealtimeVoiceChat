@@ -171,11 +171,11 @@ Twilio Voice API endpoint to handle incoming calls.
 @app.post("/twilio/inbound_call")
 async def handle_incoming_call(self, request: Request):
     """Handle incoming call and return TwiML response to connect to Media Stream."""
-    form_data = await request.form()
-    call_sid = form_data.get('CallSid')
-    from_number = form_data.get("From")
-    to_number = form_data.get("To")
-    logging.info(f"接收到来电，CallSid: {call_sid}, From: {from_number}, To: {to_number}")
+    # form_data = await request.form()
+    # call_sid = form_data.get('CallSid')
+    # from_number = form_data.get("From")
+    # to_number = form_data.get("To")
+    # logging.info(f"接收到来电，CallSid: {call_sid}, From: {from_number}, To: {to_number}")
     response = VoiceResponse()
     # 给来电者语音提示（支持中文语音）
     response.say("您好，正在为您接通 AI 女友，请稍候...",
