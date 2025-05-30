@@ -366,7 +366,6 @@ async def process_incoming_data(ws: WebSocket, app: FastAPI, incoming_chunks: as
                 # The rest of the payload is raw PCM bytes
                 chunk = base64.b64decode(data['media']['payload'])
                 metadata["pcm"] = ulaw_to_pcm24k_fast(chunk)
-                logger.info(Colors.apply(f"🖥️📥 ←←Client media message: {metadata}").orange)
                 # Check queue size before putting data
                 current_qsize = incoming_chunks.qsize()
                 if current_qsize < MAX_AUDIO_QUEUE_SIZE:
