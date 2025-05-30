@@ -285,7 +285,6 @@ def format_timestamp_ns(timestamp_ns: int) -> str:
 import audioop
 import numpy as np
 from scipy import signal
-import librosa
 
 def ulaw_to_pcm16k(audio_bytes_ulaw, input_rate=8000, output_rate=16000):
     # μ-law → PCM 16-bit (8kHz)
@@ -315,20 +314,6 @@ def pcm16k_to_ulaw(pcm_data_16k: bytes, input_rate=16000, target_rate=8000) -> b
     ulaw_data = audioop.lin2ulaw(resampled_bytes, 2)  # 2 bytes per sample (16-bit)
 
     return ulaw_data
-
-
-def convertSampleRateToUlaw(audio_data: bytes | bytearray, original_sample_rate):
-    audio_array = np.frombuffer(audio_data, dtype=np.int16)
-    audio_array = audio_array.astype(np.float32)
-    data = librosa.resample(
-        y=audio_array, orig_sr=24000, target_sr=16000
-    )
-    data = data * (1 << 15)
-    data = data.astype(np.int16)
-    ulaw_audio = audioop.lin2ulaw(data.tobytes(), 2)
-    payload = base64.b64encode(ulaw_audio).decode()
-
-    return payload
 
 # --------------------------------------------------------------------
 # WebSocket data processing
@@ -615,9 +600,8 @@ async def send_tts_chunks(app: FastAPI, message_queue: asyncio.Queue, callbacks:
                 log_status()
                 continue
 
-            base64_chunk = convertSampleRateToUlaw(chunk, 24000)
             # # such as chunk size 9600, (a.k.a 24K*20ms*2)
-            #base64_chunk = app.state.Downsampler.get_base64_chunk(chunk)
+            base64_chunk = app.state.Downsampler.get_base64_chunk(chunk)
             message_queue.put_nowait({
                 "event": "media",
                 "streamSid": callbacks.stream_sid,
