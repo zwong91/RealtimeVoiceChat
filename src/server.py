@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 if __name__ == "__main__":
     logger.info("🖥️👋 Welcome to local real-time voice chat")
 
-from upsample_overlap import UpsampleOverlap
+from downsample_overlap import DownsampleMuLawOverlap
 from datetime import datetime
 from colors import Colors
 import uvicorn
@@ -122,7 +122,7 @@ async def lifespan(app: FastAPI):
     """
     Manages the application's lifespan, initializing and shutting down resources.
 
-    Initializes global components like SpeechPipelineManager, Upsampler, and
+    Initializes global components like SpeechPipelineManager, Downsampler, and
     AudioInputProcessor and stores them in `app.state`. Handles cleanup on shutdown.
 
     Args:
@@ -138,7 +138,7 @@ async def lifespan(app: FastAPI):
         orpheus_model=TTS_ORPHEUS_MODEL,
     )
 
-    app.state.Upsampler = UpsampleOverlap()
+    app.state.Downsampler = DownsampleMuLawOverlap()
     app.state.AudioInputProcessor = AudioInputProcessor(
         LANGUAGE,
         is_orpheus=TTS_START_ENGINE=="orpheus",
@@ -602,7 +602,7 @@ async def send_tts_chunks(app: FastAPI, message_queue: asyncio.Queue, callbacks:
                 log_status()
                 continue
 
-            base64_chunk = app.state.Upsampler.get_base64_chunk(chunk)
+            base64_chunk = app.state.Downsampler.get_base64_chunk(chunk)
             message_queue.put_nowait({
                 "event": "media",
                 "streamSid": callbacks.stream_sid,
