@@ -60,7 +60,7 @@ except ValueError:
 
 
 from twilio.rest import Client
-from twilio.twiml.voice_response import VoiceResponse, Connect
+from twilio.twiml.voice_response import VoiceResponse, Connect, Stream
 import ngrok
 from dotenv import load_dotenv
 # 加载环境变量
@@ -176,7 +176,7 @@ async def handle_incoming_call(request: Request):
     call_sid = form_data.get('CallSid')
     from_number = form_data.get("From")
     to_number = form_data.get("To")
-    logger.info(f"接收到来电，CallSid: {call_sid}, From: {from_number}, To: {to_number}")
+    logger.info(f"📞 接收到来电，CallSid: {call_sid}, From: {from_number}, To: {to_number}")
     response = VoiceResponse()
     # 给来电者语音提示（支持中文语音）
     # response.say("您好，正在为您接通 AI 女友，请稍候...",
@@ -185,7 +185,10 @@ async def handle_incoming_call(request: Request):
     connect = Connect()
     stream_url = f'wss://{request.url.hostname}/media-stream'
     logger.info('Got websocket URL: %s', stream_url)
-    connect.stream(url=stream_url)
+    # 创建 stream 对象，并添加参数
+    stream = Stream(url=stream_url)
+    stream.parameter(name="audioFormat", value="audio/L16;rate=16000")
+    connect.append(stream)
     response.append(connect)
     return HTMLResponse(content=str(response), media_type="application/xml")
 
@@ -230,7 +233,9 @@ async def handle_outgoing_call(request: Request):
     """Handle outgoing call and return TwiML response to connect to Media Stream."""
     response = VoiceResponse()
     connect = Connect()
-    connect.stream(url=f'wss://{request.url.hostname}/media-stream')
+    stream = Stream(url=f'wss://{request.url.hostname}/media-stream')
+    stream.parameter(name="audioFormat", value="audio/L16;rate=16000")
+    connect.append(stream)
     response.append(connect)
     return HTMLResponse(content=str(response), media_type="application/xml")
 
@@ -282,39 +287,8 @@ def format_timestamp_ns(timestamp_ns: int) -> str:
     return formatted_timestamp
 
 
-import audioop
 import numpy as np
 from scipy import signal
-
-def ulaw_to_pcm16k(audio_bytes_ulaw, input_rate=8000, output_rate=16000):
-    # μ-law → PCM 16-bit (8kHz)
-    pcm_8k = audioop.ulaw2lin(audio_bytes_ulaw, 2)  # 2 bytes = 16-bit
-
-    # 转成 numpy array
-    audio_np = np.frombuffer(pcm_8k, dtype=np.int16)
-
-    # 升采样到 16kHz
-    num_samples = int(len(audio_np) * output_rate / input_rate)
-    audio_resampled = signal.resample(audio_np, num_samples).astype(np.int16)
-
-    return audio_resampled.tobytes()
-
-def pcm16k_to_ulaw(pcm_data_16k: bytes, input_rate=16000, target_rate=8000) -> bytes:
-    # Step 1: 转换为 numpy array，int16
-    pcm_array = np.frombuffer(pcm_data_16k, dtype=np.int16)
-
-    # Step 2: 降采样到 8000 Hz
-    resample_len = int(len(pcm_array) * target_rate / input_rate)
-    resampled = signal.resample(pcm_array, resample_len).astype(np.int16)
-
-    # Step 3: 转换为 bytes
-    resampled_bytes = resampled.tobytes()
-
-    # Step 4: PCM -> μ-law
-    ulaw_data = audioop.lin2ulaw(resampled_bytes, 2)  # 2 bytes per sample (16-bit)
-
-    return ulaw_data
-
 
 def convertSampleRateTo16khz(audio_data: bytes | bytearray, original_sample_rate):
     if original_sample_rate == 16000:
@@ -379,9 +353,9 @@ async def process_incoming_data(ws: WebSocket, app: FastAPI, incoming_chunks: as
                 metadata["server_received"] = server_ns
                 metadata["server_received_formatted"] = format_timestamp_ns(server_ns)
 
-                # The rest of the payload is raw PCM bytes g711_ulaw format
+                # The rest of the payload is raw PCM bytes L16, 16-bit linear PCM
                 chunk = base64.b64decode(data['media']['payload'])
-                metadata["pcm"] = ulaw_to_pcm16k(chunk)
+                metadata["pcm"] = chunk
                 # Check queue size before putting data
                 current_qsize = incoming_chunks.qsize()
                 if current_qsize < MAX_AUDIO_QUEUE_SIZE:
@@ -620,7 +594,7 @@ async def send_tts_chunks(app: FastAPI, message_queue: asyncio.Queue, callbacks:
 
             pcm_data_16K = convertSampleRateTo16khz(chunk, 24000)
             # such as chunk size 9600, (a.k.a 24K*20ms*2)
-            base64_chunk = base64.b64encode(pcm16k_to_ulaw(pcm_data_16K)).decode('utf-8')
+            base64_chunk = base64.b64encode(pcm_data_16K).decode('utf-8')
             message_queue.put_nowait({
                 "event": "media",
                 "streamSid": callbacks.stream_sid,
