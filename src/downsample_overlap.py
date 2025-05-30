@@ -8,13 +8,17 @@ class DownsampleMuLawOverlap:
     SOURCE_RATE = 24000
     TARGET_RATE = 8000
     
-    # 定义一个重叠长度，以24kHz采样点数计算。
-    # 50毫秒是一个合理的起始点，因为下采样过程中的滤波器通常有几十毫秒的响应。
-    OVERLAP_SAMPLES_SOURCE = int(0.050 * SOURCE_RATE) # 24kHz 下 50ms 的采样点数
+    # Define overlap length in samples at the source rate (24kHz).
+    # 50ms is a reasonable starting point.
+    OVERLAP_SAMPLES_SOURCE = int(0.050 * SOURCE_RATE) # 1200 samples at 24kHz
 
     def __init__(self):
-        # 存储上一个24kHz原始音频块的尾部数据，用于和下一个块做重叠
-        self.overlap_buffer_24kHz: Optional[np.ndarray] = None 
+        # Initialize the overlap buffer with zeros.
+        # This buffer stores the tail of the PREVIOUS 24kHz input chunk (or zeros for the first chunk).
+        # It will be prepended to the current chunk before resampling.
+        self.overlap_buffer_24kHz: np.ndarray = np.zeros(self.OVERLAP_SAMPLES_SOURCE, dtype=np.float32)
+        # Keep track if any actual audio has been processed to refine flush behavior
+        self.any_audio_processed: bool = False
 
     def get_base64_chunk(self, chunk: bytes) -> str:
         if not chunk:
@@ -24,66 +28,99 @@ class DownsampleMuLawOverlap:
         if audio_int16.size == 0:
             return ""
 
-        # 将 16-bit PCM 转换为归一化的 float32
+        self.any_audio_processed = True # Mark that we've processed actual audio data
+
+        # Convert 16-bit PCM to normalized float32
         current_audio_float = audio_int16.astype(np.float32) / 32768.0
 
-        # 如果存在历史重叠数据，则将其与当前音频块拼接起来
-        if self.overlap_buffer_24kHz is not None:
-            # 确保拼接的重叠数据不会异常的大（例如，如果当前的 chunk 非常小）
-            combined_input_24kHz = np.concatenate((self.overlap_buffer_24kHz, current_audio_float))
-        else:
-            # 如果是第一个 chunk，则直接处理当前 chunk
-            combined_input_24kHz = current_audio_float
+        # Prepend the historical overlap data (or initial zeros) to the current audio chunk
+        combined_input_24kHz = np.concatenate((self.overlap_buffer_24kHz, current_audio_float))
 
-        # 对拼接后的 24kHz 数据进行下采样到 8kHz
+        # Resample the combined 24kHz data to 8kHz
         resampled_combined_8kHz = resample_poly(combined_input_24kHz, self.TARGET_RATE, self.SOURCE_RATE)
 
-        # 计算在 8kHz 采样率下，历史重叠数据对应的长度
-        num_overlap_samples_8kHz = 0
-        if self.overlap_buffer_24kHz is not None:
-            num_overlap_samples_8kHz = round(len(self.overlap_buffer_24kHz) * self.TARGET_RATE / self.SOURCE_RATE)
+        # Calculate how many samples in the 8kHz output correspond to the prepended overlap buffer.
+        # This is the portion to DISCARD from the beginning of the resampled output.
+        # Since self.overlap_buffer_24kHz is initialized and maintained from tails, its length might vary
+        # if input chunks are shorter than OVERLAP_SAMPLES_SOURCE.
+        # However, our __init__ ensures it starts full length.
+        # The original code's calculation is correct if `self.overlap_buffer_24kHz` can change length.
+        # If we decide to always keep it `OVERLAP_SAMPLES_SOURCE` long (padded if necessary),
+        # then `len(self.overlap_buffer_24kHz)` would always be `self.OVERLAP_SAMPLES_SOURCE`.
+        # For this version, sticking to the original dynamic calculation based on actual buffer length:
+        num_discard_samples_8kHz = round(len(self.overlap_buffer_24kHz) * self.TARGET_RATE / self.SOURCE_RATE)
         
-        # 计算当前 24kHz 音频块在 8kHz 采样率下预期应有的长度
+        # Calculate the expected length of the current audio chunk after resampling to 8kHz.
         expected_output_len_current_chunk_8kHz = round(len(current_audio_float) * self.TARGET_RATE / self.SOURCE_RATE)
 
-        # 提取输出片段：从下采样结果中，跳过历史重叠部分，取出当前音频块对应的新数据
-        # 这里的裁剪点是关键，我们从 num_overlap_samples_8kHz 处开始取，
-        # 取到期望的当前块的输出长度。
-        output_segment_float = resampled_combined_8kHz[num_overlap_samples_8kHz : num_overlap_samples_8kHz + expected_output_len_current_chunk_8kHz]
+        # Extract the valid output segment:
+        # Skip the resampled portion of the prepended overlap, take the portion for the current chunk.
+        start_index = num_discard_samples_8kHz
+        end_index = num_discard_samples_8kHz + expected_output_len_current_chunk_8kHz
+        output_segment_float = resampled_combined_8kHz[start_index:end_index]
         
-        # 处理可能的边界情况：如果计算出的输出段为空，但resampled_combined_8kHz后面还有数据，
-        # 说明是最后一个很小的chunk，直接把剩余的都输出。
-        if len(output_segment_float) == 0 and len(resampled_combined_8kHz) > num_overlap_samples_8kHz:
-             output_segment_float = resampled_combined_8kHz[num_overlap_samples_8kHz:]
+        # Handle edge case: if the calculated slice is empty but there's more data.
+        # This can happen with very small final chunks or rounding.
+        if len(output_segment_float) == 0 and len(resampled_combined_8kHz) > start_index:
+             output_segment_float = resampled_combined_8kHz[start_index:]
 
-        # 更新 `overlap_buffer_24kHz`：保存当前 24kHz 音频块的尾部，用于下一次调用
-        # 这里要取 `current_audio_float` 的最后一部分作为下一次的重叠
-        # 使用 min 避免 chunk 过小导致负索引
+        # Update `overlap_buffer_24kHz` for the NEXT call:
+        # Save the TAIL of the CURRENT 24kHz input chunk.
+        # If current chunk is shorter than OVERLAP_SAMPLES_SOURCE, the new overlap buffer will be shorter.
         self.overlap_buffer_24kHz = current_audio_float[-min(len(current_audio_float), self.OVERLAP_SAMPLES_SOURCE):]
 
-        # 将 float 格式的 8kHz 音频转换为 µ-law 格式并 Base64 编码
+        if output_segment_float.size == 0:
+            return ""
+
+        # Convert float32 8kHz audio to µ-law bytes and then Base64 encode
         pcm_int16_segment = (output_segment_float * 32767).astype(np.int16)
+        # Ensure it's not empty bytes before µ-law conversion, which expects at least 1 sample (2 bytes for int16)
+        if pcm_int16_segment.size == 0:
+            return ""
         pcm_int16_bytes = pcm_int16_segment.tobytes()
-        ulaw_bytes = audioop.lin2ulaw(pcm_int16_bytes, 2)
+        ulaw_bytes = audioop.lin2ulaw(pcm_int16_bytes, 2) # 2 for 2 bytes per sample (int16)
         
         return base64.b64encode(ulaw_bytes).decode('utf-8')
 
     def flush_base64_chunk(self) -> Optional[str]:
-        # 如果没有剩余的重叠数据，则返回 None
-        if self.overlap_buffer_24kHz is None or self.overlap_buffer_24kHz.size == 0:
+        # If no actual audio was processed, or the overlap buffer is empty, nothing to flush.
+        if not self.any_audio_processed or self.overlap_buffer_24kHz is None or self.overlap_buffer_24kHz.size == 0:
+            # Reset state for potential reuse
+            self.overlap_buffer_24kHz = np.zeros(self.OVERLAP_SAMPLES_SOURCE, dtype=np.float32)
+            self.any_audio_processed = False
             return None
 
-        # 对剩余的重叠数据进行下采样
-        final_segment_float = resample_poly(self.overlap_buffer_24kHz, self.TARGET_RATE, self.SOURCE_RATE)
+        data_to_flush_24kHz = self.overlap_buffer_24kHz
 
-        # 清空状态
-        self.overlap_buffer_24kHz = None
+        # For robust flushing of this tail segment, we should provide filter context.
+        # Prepend leading zeros (simulating silence before this tail)
+        # Append trailing zeros (allowing filter to ring out)
+        # The length of these zero paddings can be OVERLAP_SAMPLES_SOURCE.
+        leading_zeros = np.zeros(self.OVERLAP_SAMPLES_SOURCE, dtype=np.float32)
+        trailing_zeros = np.zeros(self.OVERLAP_SAMPLES_SOURCE, dtype=np.float32) # Or shorter, e.g., filter_len
+
+        # Create the input for resampling the final segment
+        final_input_to_resample_24kHz = np.concatenate((leading_zeros, data_to_flush_24kHz, trailing_zeros))
+        
+        resampled_flushed_data_8kHz = resample_poly(final_input_to_resample_24kHz, self.TARGET_RATE, self.SOURCE_RATE)
+
+        # Calculate indices to extract the part corresponding to data_to_flush_24kHz
+        start_index_8k = round(len(leading_zeros) * self.TARGET_RATE / self.SOURCE_RATE)
+        expected_len_data_8k = round(len(data_to_flush_24kHz) * self.TARGET_RATE / self.SOURCE_RATE)
+        
+        final_segment_float = resampled_flushed_data_8kHz[start_index_8k : start_index_8k + expected_len_data_8k]
+        
+        # Reset state for potential reuse
+        self.overlap_buffer_24kHz = np.zeros(self.OVERLAP_SAMPLES_SOURCE, dtype=np.float32)
+        self.any_audio_processed = False
         
         if final_segment_float.size == 0:
             return None
 
-        # 转换为 µ-law 格式
+        # Convert to µ-law and Base64
         pcm_int16_segment = (final_segment_float * 32767).astype(np.int16)
+        if pcm_int16_segment.size == 0:
+            return None
         pcm_int16_bytes = pcm_int16_segment.tobytes()
         ulaw_bytes = audioop.lin2ulaw(pcm_int16_bytes, 2)
         
