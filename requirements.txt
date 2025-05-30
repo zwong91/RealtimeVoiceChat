@@ -20,6 +20,7 @@ deepspeed
 ngrok>=1.0.0
 python-dotenv
 twilio>=9.3.2
+python-multipart
 
 transformers==4.47.0
 ctranslate2<4.5.0

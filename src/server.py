@@ -343,7 +343,7 @@ async def process_incoming_data(ws: WebSocket, app: FastAPI, incoming_chunks: as
             data = parse_json_message(text)
             if data['event'] == 'media':
                 timestamp_ms = int(data['media']['timestamp'])
-                stream_sid = data['media']['streamSid']
+                stream_sid = data['streamSid']
                 sequence_number = data['sequenceNumber']
                 flags = 0
                 client_sent_ns = timestamp_ms * 1_000_000
@@ -403,16 +403,6 @@ async def process_incoming_data(ws: WebSocket, app: FastAPI, incoming_chunks: as
                 logger.info(Colors.apply(f"🖥️📥 ←←Client start message: {metadata}").orange)
 
                 callbacks.stream_sid = stream_sid
-                # Check queue size before putting data
-                current_qsize = incoming_chunks.qsize()
-                if current_qsize < MAX_AUDIO_QUEUE_SIZE:
-                    # Now put only the metadata dict (containing PCM audio) into the processing queue.
-                    await incoming_chunks.put(metadata)
-                else:
-                    # Queue is full, drop the chunk and log a warning
-                    logger.warning(
-                        f"🖥️⚠️ Audio queue full ({current_qsize}/{MAX_AUDIO_QUEUE_SIZE}); dropping chunk. Possible lag."
-                    )
             elif data['event'] == 'mark':
                 label = data['mark']['name']
                 logger.info(Colors.apply(f"🖥️📥 ←←←←Client Incoming stream mark name: {label}").orange)
