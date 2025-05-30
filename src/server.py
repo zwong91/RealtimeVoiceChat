@@ -339,7 +339,7 @@ async def process_incoming_data(ws: WebSocket, app: FastAPI, incoming_chunks: as
     """
     try:
         while True:
-            text = await websocket.receive_text()
+            text = await ws.receive_text()
             data = parse_json_message(text)
             if data['event'] == 'media':
                 timestamp_ms = int(data['media']['timestamp'])
