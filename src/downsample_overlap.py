@@ -68,7 +68,7 @@ class ResampleOverlapUlaw:
             # Ensure self.resampled_previous_chunk is not None (shouldn't happen here due to outer if)
             assert self.resampled_previous_chunk is not None
             prev_len = len(self.resampled_previous_chunk) # Length of the *downsampled* previous chunk
-            h_prev = prev_len // 2 # Midpoint index of the *downsampled* previous chunk
+            h_prev = prev_len // 3 # Midpoint index of the *downsampled* previous chunk
 
             # *** CORRECTED INDEX CALCULATION (Reverted to original) ***
             # Calculate the end index for the part corresponding to the current chunk's main contribution
