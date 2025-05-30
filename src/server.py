@@ -178,9 +178,9 @@ async def handle_incoming_call(request: Request):
     logger.info(f"接收到来电，CallSid: {call_sid}, From: {from_number}, To: {to_number}")
     response = VoiceResponse()
     # 给来电者语音提示（支持中文语音）
-    response.say("您好，正在为您接通 AI 女友，请稍候...",
-                    voice='Google.cmn-CN-Wavenet-A',
-                    language='cmn-CN')
+    # response.say("您好，正在为您接通 AI 女友，请稍候...",
+    #                 voice='Google.cmn-CN-Wavenet-A',
+    #                 language='cmn-CN')
     connect = Connect()
     stream_url = f'wss://{request.url.hostname}/media-stream'
     logger.info('Got websocket URL: %s', stream_url)
