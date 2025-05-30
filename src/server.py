@@ -169,7 +169,7 @@ app.add_middleware(
 Twilio Voice API endpoint to handle incoming calls.
 """
 @app.post("/twilio/inbound_call")
-async def handle_incoming_call(self, request: Request):
+async def handle_incoming_call(request: Request):
     """Handle incoming call and return TwiML response to connect to Media Stream."""
     form_data = await request.form()
     call_sid = form_data.get('CallSid')
@@ -210,7 +210,7 @@ async def handle_sms(request: Request):
         raise
 
 @app.post("/twilio/make_call")
-async def make_call(self, request: Request):
+async def make_call(request: Request):
     """Make an outgoing call to the specified phone number."""
     data = await request.json()
     to_phone_number = data.get("to")
@@ -225,7 +225,7 @@ async def make_call(self, request: Request):
     return {"Call started with SID": call.sid}
 
 @app.api_route("/twilio/outbound_call", methods=["GET", "POST"])
-async def handle_outgoing_call(self, request: Request):
+async def handle_outgoing_call(request: Request):
     """Handle outgoing call and return TwiML response to connect to Media Stream."""
     response = VoiceResponse()
     connect = Connect()
