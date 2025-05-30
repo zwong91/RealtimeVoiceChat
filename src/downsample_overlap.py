@@ -17,7 +17,7 @@ class ResampleOverlap:
         self.previous_chunk = None
         self.resampled_previous_chunk = None
         self.initial_padding_samples_in = int(input_fs * overlap_ms / 1000)
-        self.kaiser_beta = 14  # 越大抗混叠越好，常用 8~14 之间
+        self.kaiser_beta = 10  # 越大抗混叠越好，常用 8~14 之间
         self.window = ('kaiser', self.kaiser_beta)
 
     def get_base64_chunk(self, chunk: bytes) -> str:
