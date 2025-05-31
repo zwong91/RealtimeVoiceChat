@@ -18,8 +18,8 @@ class ResampleOverlap:
         self.previous_tail = None  # 保存上一块的尾部用于平滑连接
         self.initial_padding_samples_in = int(input_fs * overlap_ms / 1000)
         
-        # 使用更保守的滤波参数
-        self.kaiser_beta = 6  # 降低到6，减少振铃效应
+        # 使用最温和的滤波参数
+        self.kaiser_beta = 4  # 进一步降低，最大程度减少振铃
         self.window = ('kaiser', self.kaiser_beta)
         
         # 用于平滑连接的渐变长度（很短，只处理边界）
@@ -42,7 +42,8 @@ class ResampleOverlap:
                 padded_audio_float,
                 self.output_fs,
                 self.input_fs,
-                window=self.window
+                window=self.window,
+                axis=0
             )
             padding_samples_out = int(self.initial_padding_samples_in * self.output_fs / self.input_fs)
             clean_downsampled = downsampled[padding_samples_out:]
@@ -57,7 +58,8 @@ class ResampleOverlap:
                 combined,
                 self.output_fs,
                 self.input_fs,
-                window=self.window
+                window=self.window,
+                axis=0
             )
             skip_samples = int(self.overlap_samples_in * self.output_fs / self.input_fs)
             clean_downsampled = downsampled[skip_samples:]
@@ -83,8 +85,15 @@ class ResampleOverlap:
         else:
             self.previous_tail = clean_downsampled
 
-        # 最小化的后处理
-        clipped = np.clip(clean_downsampled, -0.999, 0.999)  # 稍微保守的限幅
+        # 最小化的后处理 - 添加轻微的抗混叠
+        clipped = np.clip(clean_downsampled, -0.95, 0.95)  # 更保守的限幅
+        
+        # 应用极轻微的低通滤波，去除可能的高频振铃
+        if len(clipped) > 2:
+            # 非常温和的3点低通：[0.25, 0.5, 0.25]
+            filtered = np.copy(clipped)
+            filtered[1:-1] = 0.25 * clipped[:-2] + 0.5 * clipped[1:-1] + 0.25 * clipped[2:]
+            clipped = filtered
         
         # 转换为整数，使用舍入而不是截断
         int16_audio = np.round(clipped * 32767.0).astype(np.int16).tobytes()
@@ -100,7 +109,13 @@ class ResampleOverlap:
                 fade_out = np.linspace(1, 0, fade_out_len)
                 final_chunk[-fade_out_len:] *= fade_out
 
-            clipped = np.clip(final_chunk, -0.999, 0.999)
+            clipped = np.clip(final_chunk, -0.95, 0.95)
+            
+            # 同样的轻微低通滤波
+            if len(clipped) > 2:
+                filtered = np.copy(clipped)
+                filtered[1:-1] = 0.25 * clipped[:-2] + 0.5 * clipped[1:-1] + 0.25 * clipped[2:]
+                clipped = filtered
             int16_audio = np.round(clipped * 32767.0).astype(np.int16).tobytes()
             ulaw_audio = audioop.lin2ulaw(int16_audio, 2)
             
