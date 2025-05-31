@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 if __name__ == "__main__":
     logger.info("🖥️👋 Welcome to local real-time voice chat")
 
-from downsample_overlap import ResampleOverlap
+from downsample_overlap import DownsampleOverlapUlaw
 from datetime import datetime
 from colors import Colors
 import uvicorn
@@ -138,7 +138,7 @@ async def lifespan(app: FastAPI):
         orpheus_model=TTS_ORPHEUS_MODEL,
     )
 
-    app.state.Downsampler = ResampleOverlap()
+    app.state.Downsampler = DownsampleOverlapUlaw()
     app.state.AudioInputProcessor = AudioInputProcessor(
         LANGUAGE,
         is_orpheus=TTS_START_ENGINE=="orpheus",
