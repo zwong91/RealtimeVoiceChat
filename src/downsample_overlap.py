@@ -1,42 +1,29 @@
 import base64
 import numpy as np
+from scipy.signal import resample_poly
 import audioop
 from typing import Optional
 
 class ResampleOverlap:
     """
-    使用最简单可靠的重采样方法，完全避免复杂滤波造成的吱吱声。
+    音频流按块重采样（24kHz 到 8kHz）并进行重叠处理。
+    专门解决点击声和吱吱声问题。
     """
 
     def __init__(self, input_fs: int = 24000, output_fs: int = 8000, overlap_ms: int = 20):
         self.input_fs = input_fs
         self.output_fs = output_fs
-        self.ratio = input_fs / output_fs  # 3.0
-        
         self.overlap_samples_in = int(input_fs * overlap_ms / 1000)
-        self.overlap_samples_out = int(output_fs * overlap_ms / 1000)
-        
         self.previous_chunk = None
-        self.leftover_samples = np.array([], dtype=np.float32)
+        self.previous_tail = None  # 保存上一块的尾部用于平滑连接
+        self.initial_padding_samples_in = int(input_fs * overlap_ms / 1000)
         
-        # 极简单的低通滤波系数，只是轻微平滑
-        self.smooth_factor = 0.1
-
-    def _simple_decimate(self, audio: np.ndarray) -> np.ndarray:
-        """最简单的3:1下采样，先轻微平滑再抽取"""
-        if len(audio) == 0:
-            return audio
-            
-        # 超轻微的平滑，只是稍微减少高频
-        smoothed = np.copy(audio)
-        if len(audio) > 2:
-            for i in range(1, len(audio) - 1):
-                smoothed[i] = (1 - 2 * self.smooth_factor) * audio[i] + \
-                             self.smooth_factor * (audio[i-1] + audio[i+1])
+        # 使用更保守的滤波参数
+        self.kaiser_beta = 14  # 降低到6，减少振铃效应
+        self.window = ('kaiser', self.kaiser_beta)
         
-        # 直接每3个样本取1个
-        decimated = smoothed[::3]
-        return decimated
+        # 用于平滑连接的渐变长度（很短，只处理边界）
+        self.fade_samples = max(8, int(output_fs * 2 / 1000))  # 2ms的渐变
 
     def get_base64_chunk(self, chunk: bytes) -> str:
         if not chunk:
@@ -45,86 +32,84 @@ class ResampleOverlap:
         audio_int16 = np.frombuffer(chunk, dtype=np.int16)
         audio_float = audio_int16.astype(np.float32) / 32768.0
 
-        # 拼接剩余样本和新样本
-        if len(self.leftover_samples) > 0:
-            combined_audio = np.concatenate([self.leftover_samples, audio_float])
+        if self.previous_chunk is None:
+            # 第一块：添加零填充避免边界效应
+            padded_audio_float = np.concatenate([
+                np.zeros(self.initial_padding_samples_in, dtype=np.float32),
+                audio_float
+            ])
+            downsampled = resample_poly(
+                padded_audio_float,
+                self.output_fs,
+                self.input_fs,
+                window=self.window
+            )
+            padding_samples_out = int(self.initial_padding_samples_in * self.output_fs / self.input_fs)
+            clean_downsampled = downsampled[padding_samples_out:]
+
         else:
-            combined_audio = audio_float
+            # 后续块：使用重叠处理
+            combined = np.concatenate([
+                self.previous_chunk[-self.overlap_samples_in:], 
+                audio_float
+            ])
+            downsampled = resample_poly(
+                combined,
+                self.output_fs,
+                self.input_fs,
+                window=self.window
+            )
+            skip_samples = int(self.overlap_samples_in * self.output_fs / self.input_fs)
+            clean_downsampled = downsampled[skip_samples:]
 
-        # 处理重叠
-        if self.previous_chunk is not None:
-            # 简单的线性交叉淡化
-            overlap_len = min(self.overlap_samples_in, len(self.previous_chunk), len(combined_audio))
-            if overlap_len > 0:
-                fade_out = np.linspace(1, 0, overlap_len)
-                fade_in = np.linspace(0, 1, overlap_len)
-                
-                overlap_region = (self.previous_chunk[-overlap_len:] * fade_out + 
-                                combined_audio[:overlap_len] * fade_in)
-                
-                combined_audio = np.concatenate([
-                    self.previous_chunk[:-overlap_len],
-                    overlap_region,
-                    combined_audio[overlap_len:]
-                ])
+        # 关键改进：平滑连接处理
+        if self.previous_tail is not None and len(clean_downsampled) > self.fade_samples:
+            # 检查连接处是否有明显的跳跃
+            connection_diff = clean_downsampled[0] - self.previous_tail[-1]
+            
+            # 如果跳跃幅度超过阈值，进行平滑处理
+            if abs(connection_diff) > 0.01:  # 阈值可调
+                # 创建短暂的渐变来消除跳跃
+                fade_in = np.linspace(0, 1, self.fade_samples)
+                correction = connection_diff * (1 - fade_in)
+                clean_downsampled[:self.fade_samples] -= correction
 
-        # 简单下采样
-        downsampled = self._simple_decimate(combined_audio)
-        
-        # 计算需要保留多少样本给下次处理
-        samples_used = len(downsampled) * 3
-        if samples_used < len(combined_audio):
-            self.leftover_samples = combined_audio[samples_used:]
-        else:
-            self.leftover_samples = np.array([], dtype=np.float32)
-
-        # 更新上一块数据
+        # 更新状态
         self.previous_chunk = audio_float
+        
+        # 保存当前块的尾部用于下次连接
+        if len(clean_downsampled) > self.fade_samples:
+            self.previous_tail = clean_downsampled[-self.fade_samples:]
+        else:
+            self.previous_tail = clean_downsampled
 
-        # 最简单的后处理
-        clipped = np.clip(downsampled, -0.95, 0.95)
+        # 最小化的后处理
+        clipped = np.clip(clean_downsampled, -0.999, 0.999)  # 稍微保守的限幅
         
-        # 再次轻微平滑，减少量化噪声
-        if len(clipped) > 2:
-            final_smooth = np.copy(clipped)
-            for i in range(1, len(clipped) - 1):
-                final_smooth[i] = 0.7 * clipped[i] + 0.15 * (clipped[i-1] + clipped[i+1])
-            clipped = final_smooth
-        
+        # 转换为整数，使用舍入而不是截断
         int16_audio = np.round(clipped * 32767.0).astype(np.int16).tobytes()
         ulaw_audio = audioop.lin2ulaw(int16_audio, 2)
         return base64.b64encode(ulaw_audio).decode("utf-8")
 
     def flush_base64_chunk(self) -> Optional[str]:
-        if len(self.leftover_samples) > 0:
-            # 处理剩余样本
-            final_downsampled = self._simple_decimate(self.leftover_samples)
+        if self.previous_tail is not None and len(self.previous_tail) > 0:
+            # 对最后一块应用轻微的淡出，避免突然结束
+            final_chunk = np.copy(self.previous_tail)
+            fade_out_len = min(len(final_chunk), self.fade_samples)
+            if fade_out_len > 0:
+                fade_out = np.linspace(1, 0, fade_out_len)
+                final_chunk[-fade_out_len:] *= fade_out
+
+            clipped = np.clip(final_chunk, -0.999, 0.999)
+            int16_audio = np.round(clipped * 32767.0).astype(np.int16).tobytes()
+            ulaw_audio = audioop.lin2ulaw(int16_audio, 2)
             
-            if len(final_downsampled) > 0:
-                # 应用淡出
-                fade_len = min(len(final_downsampled), 20)
-                if fade_len > 0:
-                    fade_out = np.linspace(1, 0, fade_len)
-                    final_downsampled[-fade_len:] *= fade_out
-                
-                clipped = np.clip(final_downsampled, -0.95, 0.95)
-                
-                # 同样的轻微平滑
-                if len(clipped) > 2:
-                    final_smooth = np.copy(clipped)
-                    for i in range(1, len(clipped) - 1):
-                        final_smooth[i] = 0.7 * clipped[i] + 0.15 * (clipped[i-1] + clipped[i+1])
-                    clipped = final_smooth
-                
-                int16_audio = np.round(clipped * 32767.0).astype(np.int16).tobytes()
-                ulaw_audio = audioop.lin2ulaw(int16_audio, 2)
-                
-                self.leftover_samples = np.array([], dtype=np.float32)
-                return base64.b64encode(ulaw_audio).decode("utf-8")
-        
+            # 清理状态
+            self.previous_tail = None
+            return base64.b64encode(ulaw_audio).decode("utf-8")
         return None
 
     def reset(self):
         """重置处理器状态"""
         self.previous_chunk = None
-        self.leftover_samples = np.array([], dtype=np.float32)
+        self.previous_tail = None
