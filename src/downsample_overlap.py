@@ -19,7 +19,7 @@ class ResampleOverlap:
         self.initial_padding_samples_in = int(input_fs * overlap_ms / 1000)
         
         # 使用更保守的滤波参数
-        self.kaiser_beta = 14  # 降低到6，减少振铃效应
+        self.kaiser_beta = 10  # 降低到10，减少振铃效应
         self.window = ('kaiser', self.kaiser_beta)
         
         # 用于平滑连接的渐变长度（很短，只处理边界）
