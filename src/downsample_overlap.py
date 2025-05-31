@@ -10,7 +10,7 @@ class ResampleOverlap:
     专门解决点击声和吱吱声问题。
     """
 
-    def __init__(self, input_fs: int = 24000, output_fs: int = 8000, overlap_ms: int = 20):
+    def __init__(self, input_fs: int = 24000, output_fs: int = 8000, overlap_ms: int = 10):
         self.input_fs = input_fs
         self.output_fs = output_fs
         self.overlap_samples_in = int(input_fs * overlap_ms / 1000)
@@ -19,7 +19,7 @@ class ResampleOverlap:
         self.initial_padding_samples_in = int(input_fs * overlap_ms / 1000)
         
         # 使用更保守的滤波参数
-        self.kaiser_beta = 12  # 降低到12，减少振铃效应
+        self.kaiser_beta = 10  # 降低到10，减少振铃效应
         self.window = ('kaiser', self.kaiser_beta)
         
         # 用于平滑连接的渐变长度（很短，只处理边界）
