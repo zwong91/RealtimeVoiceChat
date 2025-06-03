@@ -126,7 +126,7 @@ dpkg -i cuda-keyring_1.1-1_all.deb
 apt-get update
 apt-get -y install cudnn
 
-apt-get install libcudnn8 && apt-get install libcudnn8-dev
+apt-get -y install libcudnn8 libcudnn8-dev
 
 ```
 
