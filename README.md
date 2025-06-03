@@ -120,12 +120,6 @@ ollama pull hf.co/bartowski/huihui-ai_Mistral-Small-24B-Instruct-2501-abliterate
 
 ## 安装 cuBLAS 和 cuDNN
 # apt install -y cuda-toolkit-12-4
-
-wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
-dpkg -i cuda-keyring_1.1-1_all.deb
-apt-get update
-apt-get -y install cudnn
-
 apt-get -y install libcudnn8 libcudnn8-dev
 
 ```

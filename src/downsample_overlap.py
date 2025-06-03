@@ -16,18 +16,23 @@ class ResampleOverlap:
     def get_base64_chunk(self, chunk: bytes) -> str:
         if not chunk:
             return ""
-        # Step 1: 转换为 numpy array，int16
+        # Step 1: bytes → int16
         pcm_array = np.frombuffer(chunk, dtype=np.int16)
+
+        # Step 2: int16 → float32 for resampling
         audio_float = pcm_array.astype(np.float32) / 32768.0
 
-        # Step 2: 降采样到 8000 Hz
-        resample_len = int(len(pcm_array) * self.output_fs / self.input_fs)
-        resampled = signal.resample(pcm_array, resample_len).astype(np.int16)
+        # Step 3: Resample 24kHz → 8kHz using polyphase
+        resampled_float = resample_poly(audio_float, self.output_fs, self.input_fs)
 
-        # Step 3: 转换为 bytes  # chunk size 9600, (a.k.a 24K*20ms*2)
-        resampled_bytes = resampled.tobytes()
+        # Step 4: float32 → int16
+        resampled_int16 = np.clip(resampled_float * 32768.0, -32768, 32767).astype(np.int16)
 
-        # Step 4: PCM -> μ-law
-        ulaw_data = audioop.lin2ulaw(resampled_bytes, 2)  # 2 bytes per sample (16-bit)
+        # Step 5: int16 → bytes
+        resampled_bytes = resampled_int16.tobytes()
 
-        return base64.b64encode(ulaw_data).decode("utf-8")
+        # Step 6: PCM 16-bit → μ-law (G.711)
+        ulaw_bytes = audioop.lin2ulaw(resampled_bytes, 2)
+
+        # Step 7: μ-law bytes → base64
+        return base64.b64encode(ulaw_bytes).decode("utf-8")
