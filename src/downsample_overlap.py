@@ -9,7 +9,7 @@ class ResampleOverlap:
     音频流按块重采样（24kHz 到 8kHz）处理。
     """
 
-    def __init__(self, input_fs: int = 24000, output_fs: int = 8000, chunk_ms=20, overlap_ratio=0.5):
+    def __init__(self, input_fs: int = 24000, output_fs: int = 8000, chunk_ms=10, overlap_ratio=0.5):
         self.input_fs = input_fs
         self.output_fs = output_fs
         self.chunk_samples = int(input_fs * chunk_ms / 1000)
