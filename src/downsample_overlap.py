@@ -12,12 +12,12 @@ class ResampleOverlap:
     """
 
     def __init__(self, input_fs: int = 24000, output_fs: int = 8000,
-                 overlap_ms: int = 20, fade_ms: int = 20, window: str = "kaiser_best"):
+                 overlap_ms: int = 20, fade_ms: int = 20):
         self.input_fs = input_fs
         self.output_fs = output_fs
         self.overlap_samples_in = int(overlap_ms * input_fs / 1000)
         self.fade_samples = int(fade_ms * output_fs / 1000)
-        self.window = window
+        self.window = ("kaiser", 14.0)
 
         self.previous_chunk: Optional[np.ndarray] = None
         self.previous_overlap: Optional[np.ndarray] = None
