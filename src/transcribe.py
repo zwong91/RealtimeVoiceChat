@@ -37,7 +37,7 @@ DEFAULT_RECORDER_CONFIG: Dict[str, Any] = {
     "enable_realtime_transcription": True,
     "realtime_processing_pause": 0.03,
     "silero_use_onnx": True,
-    "silero_deactivity_detection": True,
+    "silero_deactivity_detection": False,
     "early_transcription_on_silence": 0,
     "beam_size": 3,
     "beam_size_realtime": 3,
@@ -647,8 +647,6 @@ class TranscriptionProcessor:
              if audio_copy is not None and len(audio_copy) > 0:
                  self.last_audio_copy = audio_copy
                  logger.debug(f"👂💾 Successfully got audio copy (length: {len(audio_copy)} samples).")
-
-
              return audio_copy
         except Exception as e:
              logger.error(f"👂💥 Error getting audio copy: {e}", exc_info=True)
