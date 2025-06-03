@@ -1,6 +1,6 @@
 import base64
 import numpy as np
-from scipy import signal
+from scipy.signal import resample_poly
 import audioop
 from typing import Optional
 
