@@ -12,7 +12,7 @@ class ResampleOverlap:
     """
 
     def __init__(self, input_fs: int = 24000, output_fs: int = 8000,
-                 overlap_ms: int = 20, fade_ms: int = 20):
+                 overlap_ms: int = 8, fade_ms: int = 8):
         self.input_fs = input_fs
         self.output_fs = output_fs
         self.overlap_samples_in = int(overlap_ms * input_fs / 1000)
